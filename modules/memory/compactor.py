@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -50,15 +51,38 @@ class ContextCompactor:
         return path
 
     def query_insights(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
-        if not self.collection:
-            return []
+        """Search insights using keyword matching (lightweight TF-IDF-like)."""
         try:
-            results = self.collection.query(query_texts=[query], n_results=limit)
+            # Load all snapshots
+            results: list[dict[str, Any]] = []
+            query_words = set(query.lower().split())
+            for path in sorted(self.snapshot_dir.glob("*.json"), reverse=True)[:30]:
+                try:
+                    snapshot = json.loads(path.read_text(encoding="utf-8"))
+                    for post in snapshot.get("top_posts", []):
+                        content = post.get("content", {}).get("body", "")
+                        metadata = {
+                            "date": snapshot.get("date", ""),
+                            "account": post.get("account", ""),
+                            "category": post.get("product", {}).get("category", ""),
+                            "clicks": post.get("performance", {}).get("clicks", 0),
+                        }
+                        # Simple keyword relevance score
+                        content_lower = content.lower()
+                        score = sum(1 for word in query_words if word in content_lower)
+                        if score > 0 or not query_words:
+                            results.append({
+                                "document": content[:500],
+                                "metadata": metadata,
+                                "relevance": score,
+                            })
+                except Exception:
+                    continue
+            # Sort by relevance then by clicks
+            results.sort(key=lambda x: (x.get("relevance", 0), x.get("metadata", {}).get("clicks", 0)), reverse=True)
+            return results[:limit]
         except Exception:
             return []
-        documents = results.get("documents", [[]])[0]
-        metadatas = results.get("metadatas", [[]])[0]
-        return [{"document": doc, "metadata": meta} for doc, meta in zip(documents, metadatas, strict=False)]
 
     def _snapshot_payload(self, day: datetime, posts: list[PostRecord]) -> dict[str, Any]:
         return {

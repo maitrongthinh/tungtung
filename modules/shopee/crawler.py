@@ -118,6 +118,20 @@ class ShopeeCrawler:
         self.proxy_pool = proxy_pool
         self.affiliate_api = affiliate_api
         self.assets_root = Path(self.settings.farm_dir / "assets")
+        # HTTP headers that mimic real browser
+        self._browser_headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language": "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+            "Cache-Control": "max-age=0",
+        }
 
     async def crawl_categories(self, categories: list[str], limit_per_category: int = 20) -> list[ProductRecord]:
         deduped: dict[str, ProductRecord] = {}
@@ -128,8 +142,6 @@ class ShopeeCrawler:
             logger.warning("Playwright not installed - using API-only crawl mode")
         browser = await _get_shared_browser() if _HAS_PLAYWRIGHT else None
         for category in categories:
-            if not browser:
-                break
             sort_options = random.sample(SORT_BY_OPTIONS, min(3, len(SORT_BY_OPTIONS)))
             for sort_by in sort_options:
                 if len(deduped) >= self.settings.shopee.max_products_per_cycle:
@@ -197,6 +209,15 @@ class ShopeeCrawler:
             if api_products:
                 logger.info("API search succeeded for %s (sort=%s): %d products", category, sort_by, len(api_products))
                 return api_products
+
+            # Fallback: httpx HTML scraping if no browser
+            if not browser:
+                html_products = await self._crawl_via_httpx(category, limit=limit, proxy_url=proxy_url, sort_by=sort_by)
+                if html_products:
+                    logger.info("httpx HTML scrape succeeded for %s: %d products", category, len(html_products))
+                    return html_products
+                logger.warning("Both API and httpx failed for %s", category)
+                return []
 
             # Fallback Playwright
             logger.info("API empty for %s sort=%s, trying Playwright", category, sort_by)
@@ -404,6 +425,113 @@ class ShopeeCrawler:
                 except Exception as exc:
                     logger.debug("Skipping image %s for %s: %s", image_url, product.product_id, exc)
         return None
+
+    async def _crawl_via_httpx(
+        self,
+        category: str,
+        limit: int = 20,
+        proxy_url: str | None = None,
+        sort_by: str = "relevancy",
+    ) -> list[ProductRecord]:
+        """Crawl Shopee via httpx HTML scraping (no browser needed)."""
+        proxy_dict = {"http://": proxy_url, "https://": proxy_url} if proxy_url else None
+        search_url = f"https://shopee.vn/search?keyword={quote(category)}&by={sort_by}&order=desc"
+
+        try:
+            # Get cookies from config
+            import json as _json
+            cookie_str = self.settings.integrations.shopee_affiliate_cookie or ""
+            cookie_dict = {}
+            if cookie_str:
+                try:
+                    cookies_raw = _json.loads(cookie_str)
+                    cookie_dict = {
+                        str(c["name"]): str(c["value"])
+                        for c in cookies_raw
+                        if c.get("name") and ".shopee.vn" in c.get("domain", "")
+                    }
+                except Exception:
+                    pass
+
+            async with httpx.AsyncClient(
+                timeout=30.0,
+                follow_redirects=True,
+                headers=self._browser_headers,
+                cookies=cookie_dict,
+                proxies=proxy_dict,
+            ) as client:
+                resp = await client.get(search_url)
+                if resp.status_code != 200:
+                    logger.debug("httpx HTML returned %s for %s", resp.status_code, category)
+                    return []
+
+                text = resp.text
+                # Extract product data from page script tags
+                # Shopee embeds JSON data in <script> tags
+                import re
+                products = []
+
+                # Method 1: Extract from JSON-LD
+                ld_matches = re.findall(r'<script type="application/ld\+json">(.*?)</script>', text, re.DOTALL)
+                for ld in ld_matches:
+                    try:
+                        obj = _json.loads(ld)
+                        if isinstance(obj, dict) and obj.get("@type") == "Product":
+                            name = obj.get("name", "")
+                            price = float(obj.get("offers", {}).get("price", 0))
+                            products.append({
+                                "name": name,
+                                "price": price,
+                                "product_url": obj.get("url", ""),
+                                "images": [obj.get("image", "")] if obj.get("image") else [],
+                            })
+                    except Exception:
+                        continue
+
+                # Method 2: Extract product links from HTML
+                if not products:
+                    link_pattern = re.findall(r'href="(/[^"]*-i\.(\d+)\.(\d+))"', text)
+                    for href, shop_id, item_id in link_pattern[:limit]:
+                        product_url = f"https://shopee.vn{href}"
+                        products.append({
+                            "product_id": item_id,
+                            "name": f"{category} {item_id}",
+                            "price": 0.0,
+                            "sold_count": 0,
+                            "product_url": product_url,
+                            "images": [],
+                        })
+
+                if not products:
+                    return []
+
+                # Enrich products with affiliate links
+                result = []
+                for p_data in products[:limit]:
+                    try:
+                        product = ProductRecord(
+                            product_id=p_data.get("product_id", str(len(result))),
+                            name=p_data.get("name", category),
+                            price=p_data.get("price", 0.0),
+                            original_price=p_data.get("price", 0.0),
+                            category=category,
+                            product_url=p_data.get("product_url", ""),
+                            images=p_data.get("images", []),
+                            sold_count=p_data.get("sold_count", 0),
+                        )
+                        if product.product_url:
+                            canonical = self._canonical_product_url(product.product_url)
+                            product.affiliate_link = await self.affiliate_api.generate_affiliate_link(canonical)
+                        if self.settings.features.download_assets and product.images:
+                            image_path = await self.download_best_image(product)
+                            product.image_path = str(image_path) if image_path else None
+                        result.append(product)
+                    except Exception:
+                        continue
+                return result
+        except Exception as exc:
+            logger.warning("httpx HTML crawl failed for %s: %s", category, exc)
+            return []
 
     async def _search_via_api(self, category: str, limit: int = 20, proxy_url: str | None = None, sort_by: str = "relevancy") -> list[ProductRecord]:
         """Search Shopee via httpx API — page 0 only."""
