@@ -166,6 +166,9 @@ class AgentOrchestrator:
             if not account:
                 continue
             recent_posts = self.database.get_recent_post_texts(account.id, limit=12)
+            # Boost products with known high commission
+            if product.commission_rate >= 8.0:
+                product.notes.append(f"HIGH COMMISSION: {product.commission_rate}% - prioritize this product")
             memory_insights = self._memory_insights_for_account(account.id, product.category)
             improvement = base_improvement.model_copy(deep=True)
             improvement.long_term_insights = memory_insights

@@ -27,6 +27,9 @@ class Database:
             conn.execute("PRAGMA journal_mode=WAL;")
             conn.execute("PRAGMA foreign_keys=ON;")
             conn.execute("PRAGMA busy_timeout=5000;")
+            conn.execute("PRAGMA synchronous=NORMAL;")
+            conn.execute("PRAGMA cache_size=-64000;")  # 64MB cache
+            conn.execute("PRAGMA temp_store=MEMORY;")
             _thread_local.conn = conn
         return conn
 
@@ -764,6 +767,13 @@ class Database:
                     now.isoformat(),
                 ),
             )
+
+    def vacuum_database(self) -> None:
+        """Reclaim space and defragment the database. Call during low-traffic hours."""
+        with self.connect() as conn:
+            conn.execute("VACUUM")
+            conn.execute("PRAGMA optimize")
+        logger.info("Database VACUUM complete")
 
     def purge_old_activity_log(self, retention_days: int = 30) -> int:
         cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).isoformat()

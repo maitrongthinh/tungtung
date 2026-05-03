@@ -32,6 +32,13 @@ class DailyLoopController:
             logger.info("Graceful shutdown started")
             await self.scheduler.shutdown()
             shutdown_local_executor()
+            # Close shared Playwright browser
+            try:
+                from modules.shopee.crawler import close_shared_browser
+                await close_shared_browser()
+                logger.info("Shared browser closed")
+            except Exception:
+                pass
 
     async def _initial_startup_cycle(self) -> None:
         """Chạy một prepare cycle ngay sau khi khởi động để bot làm việc liền."""

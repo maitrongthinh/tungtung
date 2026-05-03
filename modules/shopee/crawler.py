@@ -60,6 +60,45 @@ SHOPEE_API_ENDPOINTS = [
 SORT_BY_OPTIONS = ["relevancy", "sales", "price_asc", "price_desc", "ctime"]
 
 
+# Reusable browser instance for the crawler
+_shared_browser = None
+_playwright_context = None
+
+async def _get_shared_browser():
+    """Get or create a shared Playwright browser instance."""
+    global _shared_browser, _playwright_context
+    if _shared_browser is None or not _shared_browser.is_connected():
+        from playwright.async_api import async_playwright
+        _playwright_context = await async_playwright().__aenter__()
+        _shared_browser = await _playwright_context.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--disable-extensions",
+                "--disable-plugins",
+            ],
+        )
+    return _shared_browser
+
+async def close_shared_browser():
+    """Cleanup shared browser on shutdown."""
+    global _shared_browser, _playwright_context
+    if _shared_browser:
+        try:
+            await _shared_browser.close()
+        except Exception:
+            pass
+        _shared_browser = None
+    if _playwright_context:
+        try:
+            await _playwright_context.__aexit__(None, None, None)
+        except Exception:
+            pass
+        _playwright_context = None
+
+
 class ShopeeCrawler:
     def __init__(
         self,
@@ -78,45 +117,27 @@ class ShopeeCrawler:
         # Tăng limit mỗi lần cào để lấy được nhiều hơn
         effective_limit = max(limit_per_category, 30)
 
-        async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(
-                headless=self.settings.shopee.crawler_headless,
-                args=[
-                    "--no-sandbox",
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-dev-shm-usage",
-                    "--disable-extensions",
-                    "--disable-plugins",
-                ],
-            )
-            try:
-                for category in categories:
-                    # Thử nhiều sort_by để đa dạng sản phẩm
-                    sort_options = random.sample(SORT_BY_OPTIONS, min(3, len(SORT_BY_OPTIONS)))
-                    for sort_by in sort_options:
-                        if len(deduped) >= self.settings.shopee.max_products_per_cycle:
-                            break
-                        products = await self._crawl_category_with_browser(
-                            browser, category, limit=effective_limit, sort_by=sort_by
-                        )
-                        new_count = 0
-                        for product in products:
-                            if product.product_id not in deduped:
-                                deduped[product.product_id] = product
-                                new_count += 1
-                        if new_count > 0:
-                            logger.info("Category %s sort=%s: +%d products (total=%d)", category, sort_by, new_count, len(deduped))
-                        # Nếu lấy đủ từ category này thì không cần sort khác
-                        if new_count >= effective_limit * 0.8:
-                            break
-
-                    # Nếu category này ít sản phẩm, thử fallback keywords
-                    cat_count = sum(1 for p in deduped.values() if p.category == category)
-                    if cat_count < 5:
-                        await self._crawl_with_fallback_keywords(browser, category, effective_limit, deduped)
-
-            finally:
-                await browser.close()
+        browser = await _get_shared_browser()
+        for category in categories:
+            sort_options = random.sample(SORT_BY_OPTIONS, min(3, len(SORT_BY_OPTIONS)))
+            for sort_by in sort_options:
+                if len(deduped) >= self.settings.shopee.max_products_per_cycle:
+                    break
+                products = await self._crawl_category_with_browser(
+                    browser, category, limit=effective_limit, sort_by=sort_by
+                )
+                new_count = 0
+                for product in products:
+                    if product.product_id not in deduped:
+                        deduped[product.product_id] = product
+                        new_count += 1
+                if new_count > 0:
+                    logger.info("Category %s sort=%s: +%d products (total=%d)", category, sort_by, new_count, len(deduped))
+                if new_count >= effective_limit * 0.8:
+                    break
+            cat_count = sum(1 for p in deduped.values() if p.category == category)
+            if cat_count < 5:
+                await self._crawl_with_fallback_keywords(browser, category, effective_limit, deduped)
         return list(deduped.values())
 
     async def _crawl_with_fallback_keywords(
@@ -221,19 +242,8 @@ class ShopeeCrawler:
             self.proxy_pool.release(session_key)
 
     async def crawl_category(self, category: str, limit: int = 20) -> list[ProductRecord]:
-        async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(
-                headless=self.settings.shopee.crawler_headless,
-                args=[
-                    "--no-sandbox",
-                    "--disable-blink-features=AutomationControlled",
-                    "--disable-dev-shm-usage",
-                ],
-            )
-            try:
-                return await self._crawl_category_with_browser(browser, category, limit=limit)
-            finally:
-                await browser.close()
+        browser = await _get_shared_browser()
+        return await self._crawl_category_with_browser(browser, category, limit=limit)
 
     async def _paced_navigation(self, page: Page, url: str) -> None:
         await self.rate_limiter.acquire()

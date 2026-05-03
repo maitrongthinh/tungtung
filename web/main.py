@@ -107,6 +107,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if not request.url.path.startswith("/r/"):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return response
+
+
 app.mount("/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static")
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 LOG_FILE = settings.log_dir / "agent.log"
@@ -158,6 +170,67 @@ async def config_page(request: Request) -> HTMLResponse:
             "accounts_config": load_accounts_payload(live_settings.accounts_dir),
         },
     )
+
+
+# -- Login / Session Management --
+from datetime import timedelta
+
+_session_tokens: dict[str, float] = {}
+
+def _create_session() -> str:
+    token = secrets.token_urlsafe(32)
+    _session_tokens[token] = time.monotonic() + 86400
+    return token
+
+def _validate_session(token: str) -> bool:
+    expiry = _session_tokens.get(token)
+    if expiry and time.monotonic() < expiry:
+        return True
+    _session_tokens.pop(token, None)
+    return False
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request) -> HTMLResponse:
+    settings = load_settings(refresh=True)
+    if not settings.integrations.web_secret_key or settings.integrations.web_secret_key in ("replace-me", "CHANGE-ME-generate-with-secrets-token-urlsafe-32"):
+        return HTMLResponse("<h2>No password configured</h2><p>Set integrations.web_secret_key in Runtime Config first.</p>", status_code=200)
+    return HTMLResponse(
+        '<!DOCTYPE html><html lang="vi"><head>'
+        '<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Login - Shopee Agent</title><link rel="stylesheet" href="/static/styles.css">'
+        '<style>.login-box{max-width:380px;margin:80px auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:32px}'
+        '.login-box h1{font-size:1.3rem;margin-bottom:20px;text-align:center}'
+        '.login-box input{width:100%;padding:10px;margin-bottom:12px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text)}'
+        '.login-box button{width:100%;padding:12px}'
+        '.login-error{color:var(--danger);font-size:0.85rem;margin-bottom:8px;display:none}</style></head><body>'
+        '<div class="login-box"><h1>Shopee Agent Login</h1>'
+        '<div id="err" class="login-error"></div>'
+        '<input type="password" id="pw" placeholder="Enter password" autofocus />'
+        '<button onclick="doLogin()">Login</button></div>'
+        '<script>async function doLogin(){var pw=document.getElementById("pw").value;if(!pw)return;'
+        'try{var r=await fetch("/api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw})});'
+        'var d=await r.json();if(d.token){document.cookie="agent_token="+d.token+";path=/;max-age=86400;SameSite=Strict";window.location.href="/";}'
+        'else{document.getElementById("err").textContent=d.error||"Wrong password";document.getElementById("err").style.display="block";}}'
+        'catch(e){document.getElementById("err").textContent="Connection error";document.getElementById("err").style.display="block";}}'
+        'document.getElementById("pw").addEventListener("keydown",function(e){if(e.key==="Enter")doLogin()});'
+        '</script></body></html>'
+    )
+
+
+@app.post("/api/login")
+async def api_login(payload: dict, request: Request) -> JSONResponse:
+    settings = load_settings(refresh=True)
+    password = str(payload.get("password", "")).strip()
+    expected = settings.integrations.web_secret_key
+    if not expected or expected in ("replace-me", ""):
+        return JSONResponse({"error": "No password configured on server"}, status_code=503)
+    if not password:
+        return JSONResponse({"error": "Password required"}, status_code=400)
+    if not hmac.compare_digest(password, expected):
+        return JSONResponse({"error": "Wrong password"}, status_code=401)
+    token = _create_session()
+    return JSONResponse({"token": token})
 
 
 @app.get("/health")
