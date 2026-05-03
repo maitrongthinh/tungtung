@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Shopee Agent Control</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <nav class="topnav">
+    <a href="/" class="nav-brand">Shopee Agent</a>
+    <div class="nav-links">
+      <a href="/" class="active">Dashboard</a>
+      <a href="/posts">Posts</a>
+      <a href="/chat">Chat AI</a>
+      <a href="/config">Config</a>
+      <a href="/activity">Activity</a>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="header">
+      <div>
+        <h1>Shopee Agent Control</h1>
+        <p class="muted">Bảng điều khiển nội bộ cho 1 người dùng</p>
+      </div>
+      <div class="header-side">
+        <div id="clock"></div>
+        <div id="saveNotice" class="notice"></div>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="row between wrap">
+        <div>
+          <strong>Agent:</strong> <span id="statusBadge" class="badge badge-running">{{ status.status }}</span>
+          <span class="muted">| phase: <span id="currentPhase">{{ status.current_phase }}</span></span>
+        </div>
+        <div>
+          <strong>Next window:</strong>
+          <span id="nextWindow">{{ status.next_window_name or 'N/A' }}</span>
+          <span class="muted" id="nextWindowAt">{{ status.next_window_at or '' }}</span>
+          <span class="muted" id="nextWindowCountdown"></span>
+        </div>
+      </div>
+      <div class="grid two mt12">
+        <div>
+          <div><strong>KPI hôm nay:</strong> <span id="kpiLabel">{{ kpi.posts_published }}/{{ status.target_posts }}</span></div>
+          <div><strong>Proxy:</strong> <span id="proxyHealth"></span></div>
+          <div><strong>Accounts:</strong> <span id="accountHealth"></span></div>
+          <div><strong>Queue:</strong> <span id="queueHealth"></span></div>
+        </div>
+        <div>
+          <div><strong>AI hôm nay:</strong> <span id="aiUsageLine"></span></div>
+          <div class="button-row mt12">
+            <button data-action="pause">Pause</button>
+            <button data-action="resume">Resume</button>
+            <button data-action="force">Force Crawl</button>
+            <a class="button-link" href="/api/logs/download">Download Log</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="row between wrap">
+        <h2>Posts</h2>
+        <div class="tab-row">
+          <button class="tab active" data-status="">All (<span id="countAll">{{ counts.all }}</span>)</button>
+          <button class="tab" data-status="draft">Draft (<span id="countDraft">{{ counts.draft }}</span>)</button>
+          <button class="tab" data-status="scheduled">Scheduled (<span id="countScheduled">{{ counts.scheduled }}</span>)</button>
+          <button class="tab" data-status="published">Published (<span id="countPublished">{{ counts.published }}</span>)</button>
+        </div>
+      </div>
+      <div class="filters">
+        <input type="text" id="filterQuery" placeholder="Search" />
+        <input type="text" id="filterAccount" placeholder="Account" />
+        <input type="text" id="filterCategory" placeholder="Category" />
+        <input type="date" id="filterDateFrom" />
+        <input type="date" id="filterDateTo" />
+        <button id="applyFilters">Load</button>
+      </div>
+      <div id="postList" class="post-list"></div>
+    </section>
+
+    <!-- Manual Post Panel -->
+    <section class="panel" id="manualPostPanel">
+      <div class="row between wrap" style="margin-bottom:12px;">
+        <div>
+          <h2>✍️ Đăng bài thủ công</h2>
+          <p class="muted">Nhập URL sản phẩm Shopee, bot sẽ tạo nội dung AI và đăng ngay lên Facebook.</p>
+        </div>
+      </div>
+      <div class="row" style="gap:8px;flex-wrap:wrap;align-items:flex-end;">
+        <div class="form-group" style="flex:1;min-width:280px;margin-bottom:0;">
+          <label>URL sản phẩm Shopee</label>
+          <input type="text" id="manualPostUrl" placeholder="https://shopee.vn/ten-san-pham-i.123456.789012" />
+        </div>
+        <div class="form-group" style="min-width:160px;margin-bottom:0;">
+          <label>Account đăng</label>
+          <select id="manualPostAccount">
+            {% for acc in accounts_config %}
+            <option value="{{ acc.id }}">{{ acc.page_name or acc.id }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <button id="manualPostBtn" style="height:38px;white-space:nowrap;">🚀 Đăng ngay</button>
+        <button id="manualValidateBtn" class="btn-outline" style="height:38px;white-space:nowrap;">✅ Kiểm tra URL</button>
+      </div>
+      <div id="manualPostResult" style="margin-top:12px;display:none;" class="validate-result"></div>
+    </section>
+
+    <section class="grid two">
+      <section class="panel">
+        <div class="row between wrap">
+          <h2>⚙️ Runtime Config</h2>
+          <button id="saveRuntimeConfig">Save Config</button>
+        </div>
+        <p class="muted">Chỉnh cấu hình hệ thống. Nhấn vào từng mục để mở rộng. Sửa xong bấm Save Config.</p>
+        <div id="dynamicConfigEditor" style="margin-top: 12px;"></div>
+        <button class="json-toggle" id="toggleJsonEditor">📝 Sửa bằng JSON thô</button>
+        <div class="json-fallback" id="jsonFallback">
+          <textarea id="runtimeConfigEditor" class="editor"></textarea>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="row between wrap">
+          <h2>👥 Accounts</h2>
+          <button id="addAccountBtn">+ Add Account</button>
+        </div>
+        <p class="muted">Quản lý tài khoản đăng bài. Mỗi account giữ token riêng.</p>
+        <div id="accountsList" class="grid two" style="margin-top: 12px;"></div>
+      </section>
+    </section>
+
+    <section class="grid two">
+      <section class="panel">
+        <div class="row between wrap">
+          <h2>📈 Improvement</h2>
+          <a class="button-link btn-outline" href="/api/improvement" target="_blank">Open</a>
+        </div>
+        <pre id="improvementPane" class="viewer"></pre>
+      </section>
+
+      <section class="panel">
+        <h2>📋 Daily Plan</h2>
+        <pre id="dailyPlanPane" class="viewer"></pre>
+      </section>
+    </section>
+
+    <section class="panel">
+      <h2>📡 Live Log</h2>
+      <div id="errorAlerts" class="alert-list"></div>
+      <div id="logBox" class="log-box"></div>
+    </section>
+  </main>
+
+  <dialog id="postModal">
+    <article>
+      <div class="row between" style="margin-bottom: 12px;">
+        <h3 style="margin:0;">Post Detail</h3>
+        <button id="closeModal" class="btn-outline">Close</button>
+      </div>
+      <div id="modalContent"></div>
+    </article>
+  </dialog>
+
+  <dialog id="accountModal">
+    <article>
+      <h3 style="margin-bottom: 16px;">Account Details</h3>
+      <div class="form-group">
+        <label>Account ID:</label>
+        <input type="text" id="accId" placeholder="e.g. fb_page_1" />
+      </div>
+      <div class="form-group">
+        <label>Page Name:</label>
+        <input type="text" id="accPageName" />
+      </div>
+      <div class="grid two">
+        <div class="form-group">
+          <label>Niche:</label>
+          <input type="text" id="accNiche" />
+        </div>
+        <div class="form-group">
+          <label>Tone:</label>
+          <input type="text" id="accTone" placeholder="e.g. trẻ trung" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Daily Post Limit:</label>
+        <input type="number" id="accLimit" value="7" />
+      </div>
+      <div class="form-group">
+        <label>Meta Token:</label>
+        <input type="text" id="accToken" />
+      </div>
+      <div class="form-group">
+        <label>Meta Page ID:</label>
+        <input type="text" id="accPageId" />
+      </div>
+      <div class="dialog-actions">
+        <button id="saveAccountBtn">💾 Save</button>
+        <button id="closeAccountModalBtn" class="btn-outline">Cancel</button>
+      </div>
+    </article>
+  </dialog>
+
+  <script>
+    const initialPosts = {{ posts | tojson }};
+    const initialStatus = {{ status | tojson }};
+    const initialKpi = {{ kpi | tojson }};
+    const initialRuntimeConfig = {{ runtime_config | tojson }};
+    const initialAccountsConfig = {{ accounts_config | tojson }};
+    const initialAiUsage = {{ ai_usage | tojson }};
+    let currentStatusFilter = "";
+    let _currentConfigData = JSON.parse(JSON.stringify(initialRuntimeConfig));
+
+    // ─── Clock ───
+    function setClock() {
+      document.getElementById("clock").textContent = new Date().toLocaleString("vi-VN");
+    }
+
+    function showNotice(message, isError = false) {
+      const el = document.getElementById("saveNotice");
+      el.textContent = message;
+      el.dataset.error = isError ? "1" : "0";
+      clearTimeout(window._nt);
+      window._nt = setTimeout(() => { el.textContent = ""; }, 4000);
+    }
+
+    // ─── Status ───
+    function renderStatus(status, kpi) {
+      const badge = document.getElementById("statusBadge");
+      badge.textContent = status.status;
+      badge.className = "badge badge-" + (status.status === "PAUSED" ? "paused" : status.status === "ERROR" ? "error" : "running");
+      document.getElementById("currentPhase").textContent = status.current_phase || "idle";
+      document.getElementById("nextWindow").textContent = status.next_window_name || "N/A";
+      document.getElementById("nextWindowAt").textContent = status.next_window_at || "";
+      document.getElementById("kpiLabel").textContent = (kpi.posts_published || 0) + "/" + (status.target_posts || 0);
+      const proxy = status.proxy_health || {};
+      document.getElementById("proxyHealth").textContent = (proxy.alive || 0) + "/" + (proxy.total || 0) + " alive";
+      document.getElementById("accountHealth").textContent = Object.entries(status.account_health || {}).map(function(e){return e[0]+":"+e[1]}).join(" | ") || "no data";
+      document.getElementById("queueHealth").textContent = Object.entries(status.queue_stats || {}).map(function(e){return e[0]+":"+e[1]}).join(" | ") || "0";
+      renderAiUsage(status.ai_usage || initialAiUsage);
+      renderCountdown(status.next_window_at);
+    }
+
+    function renderAiUsage(usage) {
+      var line = (usage.requests || 0) + "/" + (usage.limits ? usage.limits.max_daily_requests : 0) + " req";
+      line += " | in " + (usage.input_tokens || 0) + "/" + (usage.limits ? usage.limits.max_daily_input_tokens : 0);
+      line += " | out " + (usage.output_tokens || 0) + "/" + (usage.limits ? usage.limits.max_daily_output_tokens : 0);
+      document.getElementById("aiUsageLine").textContent = line;
+    }
+
+    // ─── Posts ───
+    function renderPosts(posts) {
+      var list = document.getElementById("postList");
+      if (!posts || !posts.length) {
+        list.innerHTML = '<div class="muted">Không có bài phù hợp.</div>';
+        return;
+      }
+      list.innerHTML = posts.map(function(post) {
+        return '<article class="post-item" data-id="' + post.post_id + '">'
+          + '<div><strong>' + (post.content.title || "Untitled") + '</strong></div>'
+          + '<div>' + (post.product.name || "") + '</div>'
+          + '<div class="muted">' + post.account + ' | ' + post.status + ' | ' + (post.product.category || "") + '</div>'
+          + '<div class="muted">' + (post.scheduled_at || post.created_at || "") + '</div>'
+          + '</article>';
+      }).join("");
+      list.querySelectorAll(".post-item").forEach(function(card) {
+        card.addEventListener("click", function() { openPost(card.dataset.id); });
+      });
+    }
+
+    // ─── Dynamic Config Editor ───
+    var CONFIG_LABELS = {
+      ai: "🤖 AI Settings",
+      integrations: "🔗 Integrations",
+      shopee: "🛒 Shopee",
+      meta: "📱 Meta / Facebook",
+      kpi: "📊 KPI",
+      loop: "🔄 Loop",
+      features: "⚡ Features",
+      memory: "🧠 Memory",
+      web: "🌐 Web",
+      runtime: "⚙️ Runtime",
+      focus: "🎯 Category Focus",
+      storage: "💾 Storage"
+    };
+
+    function renderDynamicConfig(config) {
+      _currentConfigData = JSON.parse(JSON.stringify(config));
+      var container = document.getElementById("dynamicConfigEditor");
+      container.innerHTML = "";
+      var keys = Object.keys(config).sort(function(a, b) {
+        var order = ["ai", "integrations", "focus", "shopee", "meta", "kpi", "loop", "features", "memory", "web", "runtime"];
+        var ia = order.indexOf(a), ib = order.indexOf(b);
+        if (ia === -1) ia = 99;
+        if (ib === -1) ib = 99;
+        return ia - ib;
+      });
+
+      keys.forEach(function(section) {
+        var val = config[section];
+        if (typeof val !== "object" || val === null) return;
+
+        var sec = document.createElement("div");
+        sec.className = "config-section";
+
+        var header = document.createElement("div");
+        header.className = "config-section-header";
+        header.innerHTML = '<span>' + (CONFIG_LABELS[section] || section) + '</span><span class="arrow">▶</span>';
+        header.addEventListener("click", function() { sec.classList.toggle("open"); });
+
+        var body = document.createElement("div");
+        body.className = "config-section-body";
+
+        Object.keys(val).forEach(function(key) {
+          var fieldVal = val[key];
+          var row = document.createElement("div");
+          row.className = "config-field";
+          var label = document.createElement("label");
+          label.textContent = key;
+          row.appendChild(label);
+
+          var input;
+          if (typeof fieldVal === "boolean") {
+            input = document.createElement("select");
+            input.innerHTML = '<option value="true"' + (fieldVal ? ' selected' : '') + '>true</option>'
+              + '<option value="false"' + (!fieldVal ? ' selected' : '') + '>false</option>';
+            input.addEventListener("change", function() {
+              _currentConfigData[section][key] = this.value === "true";
+            });
+          } else if (typeof fieldVal === "number") {
+            input = document.createElement("input");
+            input.type = "number";
+            input.value = fieldVal;
+            input.addEventListener("input", function() {
+              _currentConfigData[section][key] = Number(this.value) || 0;
+            });
+          } else if (typeof fieldVal === "string") {
+            input = document.createElement("input");
+            input.type = key.toLowerCase().includes("key") || key.toLowerCase().includes("token") || key.toLowerCase().includes("secret") ? "password" : "text";
+            input.value = fieldVal;
+            input.addEventListener("input", function() {
+              _currentConfigData[section][key] = this.value;
+            });
+          } else {
+            input = document.createElement("input");
+            input.type = "text";
+            input.value = JSON.stringify(fieldVal);
+            input.addEventListener("input", function() {
+              try { _currentConfigData[section][key] = JSON.parse(this.value); }
+              catch(e) { _currentConfigData[section][key] = this.value; }
+            });
+          }
+          row.appendChild(input);
+          body.appendChild(row);
+        });
+
+        sec.appendChild(header);
+        sec.appendChild(body);
+        container.appendChild(sec);
+      });
+
+      document.getElementById("runtimeConfigEditor").value = JSON.stringify(config, null, 2);
+    }
+
+    // ─── Accounts ───
+    function renderAccountsConfig(accounts) {
+      var list = document.getElementById("accountsList");
+      if (!accounts || !accounts.length) {
+        list.innerHTML = '<div class="muted">Chưa có account nào. Bấm "+ Add Account" để thêm.</div>';
+        window._currentAccounts = [];
+        return;
+      }
+      list.innerHTML = accounts.map(function(acc) {
+        return '<article class="account-card">'
+          + '<h3>' + (acc.page_name || acc.id) + ' <span class="muted" style="font-size:0.78rem;">(' + acc.id + ')</span></h3>'
+          + '<p class="muted">Niche: ' + (acc.niche || "–") + ' | Tone: ' + (acc.tone || "–") + ' | Limit: ' + (acc.daily_post_limit || 7) + '</p>'
+          + '<div class="row" style="margin-top:10px; gap:6px;">'
+          + '<button onclick="editAccount(\'' + acc.id + '\')">✏️ Edit</button>'
+          + '<button class="btn-danger" onclick="deleteAccount(\'' + acc.id + '\')">🗑️ Delete</button>'
+          + '</div>'
+          + '</article>';
+      }).join("");
+      window._currentAccounts = accounts;
+    }
+
+    function editAccount(id) {
+      var acc = (window._currentAccounts || []).find(function(a) { return a.id === id; });
+      if (!acc) return;
+      document.getElementById("accId").value = acc.id.replace("acc_", "");
+      document.getElementById("accId").disabled = true;
+      document.getElementById("accPageName").value = acc.page_name || "";
+      document.getElementById("accNiche").value = acc.niche || "";
+      document.getElementById("accTone").value = acc.tone || "";
+      document.getElementById("accLimit").value = acc.daily_post_limit || 7;
+      document.getElementById("accToken").value = acc.access_token || "";
+      document.getElementById("accPageId").value = acc.page_id || "";
+      document.getElementById("accountModal").showModal();
+    }
+
+    function deleteAccount(id) {
+      if (!confirm("Bạn có chắc chắn muốn xoá account " + id + "?")) return;
+      fetch("/api/accounts/" + encodeURIComponent(id), { method: "DELETE" })
+        .then(function(res) {
+          if (res.ok) { refreshAccountsConfig(); showNotice("Đã xoá account " + id); }
+          else { showNotice("Lỗi khi xoá account!", true); }
+        });
+    }
+
+    // ─── Refreshers ───
+    async function refreshStatus() {
+      try {
+        var responses = await Promise.all([fetch("/api/status"), fetch("/api/kpi/today")]);
+        renderStatus(await responses[0].json(), await responses[1].json());
+      } catch(e) {}
+    }
+
+    async function refreshImprovement() {
+      try {
+        var response = await fetch("/api/improvement");
+        document.getElementById("improvementPane").textContent = await response.text();
+      } catch(e) {}
+    }
+
+    async function refreshDailyPlan() {
+      try {
+        var response = await fetch("/api/daily-plan");
+        document.getElementById("dailyPlanPane").textContent = await response.text();
+      } catch(e) {}
+    }
+
+    async function refreshRuntimeConfig() {
+      try {
+        var response = await fetch("/api/runtime-config");
+        var data = await response.json();
+        renderDynamicConfig(data);
+      } catch(e) {}
+    }
+
+    async function refreshAccountsConfig() {
+      try {
+        var response = await fetch("/api/accounts-config");
+        renderAccountsConfig(await response.json());
+      } catch(e) {}
+    }
+
+    async function refreshCounts() {
+      try {
+        var response = await fetch("/api/posts/counts");
+        var counts = await response.json();
+        document.getElementById("countAll").textContent = counts.all || 0;
+        document.getElementById("countDraft").textContent = counts.draft || 0;
+        document.getElementById("countScheduled").textContent = counts.scheduled || 0;
+        document.getElementById("countPublished").textContent = counts.published || 0;
+      } catch(e) {}
+    }
+
+    async function refreshPosts() {
+      var params = new URLSearchParams();
+      if (currentStatusFilter) params.set("status", currentStatusFilter);
+      var query = document.getElementById("filterQuery").value.trim();
+      var account = document.getElementById("filterAccount").value.trim();
+      var category = document.getElementById("filterCategory").value.trim();
+      var dateFrom = document.getElementById("filterDateFrom").value;
+      var dateTo = document.getElementById("filterDateTo").value;
+      if (query) params.set("q", query);
+      if (account) params.set("account", account);
+      if (category) params.set("category", category);
+      if (dateFrom) params.set("date_from", dateFrom + "T00:00:00+07:00");
+      if (dateTo) params.set("date_to", dateTo + "T23:59:59+07:00");
+      try {
+        var response = await fetch("/api/posts?" + params.toString());
+        renderPosts(await response.json());
+      } catch(e) {}
+    }
+
+    async function openPost(postId) {
+      try {
+        var response = await fetch("/api/posts/" + postId);
+        var post = await response.json();
+        document.getElementById("modalContent").innerHTML =
+          '<h3>' + (post.content.title || "") + '</h3>'
+          + '<p><strong>Account:</strong> ' + post.account + '</p>'
+          + '<p><strong>Product:</strong> ' + (post.product.name || "") + '</p>'
+          + '<p><strong>Status:</strong> ' + post.status + '</p>'
+          + '<p><strong>Body:</strong> ' + (post.content.body || "") + '</p>'
+          + '<p><strong>Hashtags:</strong> ' + (post.content.hashtags || []).join(" ") + '</p>'
+          + '<p><strong>CTA:</strong> ' + (post.content.cta || "") + '</p>'
+          + '<p><strong>Affiliate:</strong> <a href="' + (post.content.affiliate_link || "") + '" target="_blank">' + (post.content.affiliate_link || "N/A") + '</a></p>'
+          + '<pre>' + JSON.stringify(post.comments || [], null, 2) + '</pre>';
+        document.getElementById("postModal").showModal();
+      } catch(e) {}
+    }
+
+    // ─── Save Config ───
+    async function saveRuntimeConfig() {
+      try {
+        var jsonFallback = document.getElementById("jsonFallback");
+        var payload;
+        if (jsonFallback.classList.contains("show")) {
+          payload = JSON.parse(document.getElementById("runtimeConfigEditor").value);
+        } else {
+          payload = _currentConfigData;
+        }
+        var response = await fetch("/api/runtime-config", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (!response.ok) throw new Error(await response.text());
+        showNotice("✅ Đã lưu runtime config!");
+        await refreshStatus();
+      } catch (error) {
+        showNotice("❌ Lưu config lỗi: " + error.message, true);
+      }
+    }
+
+    // ─── Event Bindings ───
+    function bindActions() {
+      document.querySelectorAll("[data-action]").forEach(function(button) {
+        button.addEventListener("click", async function() {
+          var routeMap = { pause: "/api/agent/pause", resume: "/api/agent/resume", force: "/api/crawl/force" };
+          await fetch(routeMap[button.dataset.action], { method: "POST" });
+          showNotice("Đã gửi lệnh " + button.dataset.action);
+        });
+      });
+      document.querySelectorAll(".tab").forEach(function(tab) {
+        tab.addEventListener("click", function() {
+          document.querySelectorAll(".tab").forEach(function(t) { t.classList.remove("active"); });
+          tab.classList.add("active");
+          currentStatusFilter = tab.dataset.status;
+          refreshPosts();
+        });
+      });
+      document.getElementById("applyFilters").addEventListener("click", refreshPosts);
+      document.getElementById("saveRuntimeConfig").addEventListener("click", saveRuntimeConfig);
+      document.getElementById("closeModal").addEventListener("click", function() { document.getElementById("postModal").close(); });
+
+      // Account modal
+      document.getElementById("addAccountBtn").addEventListener("click", function() {
+        document.getElementById("accId").value = "";
+        document.getElementById("accId").disabled = false;
+        document.getElementById("accPageName").value = "";
+        document.getElementById("accNiche").value = "thoi trang";
+        document.getElementById("accTone").value = "tre trung";
+        document.getElementById("accLimit").value = "7";
+        document.getElementById("accToken").value = "";
+        document.getElementById("accPageId").value = "";
+        document.getElementById("accountModal").showModal();
+      });
+
+      document.getElementById("closeAccountModalBtn").addEventListener("click", function() {
+        document.getElementById("accountModal").close();
+      });
+
+      document.getElementById("saveAccountBtn").addEventListener("click", async function() {
+        var payload = {
+          id: document.getElementById("accId").value || "new_acc",
+          page_name: document.getElementById("accPageName").value,
+          niche: document.getElementById("accNiche").value,
+          tone: document.getElementById("accTone").value,
+          daily_post_limit: parseInt(document.getElementById("accLimit").value, 10) || 7,
+          access_token: document.getElementById("accToken").value,
+          page_id: document.getElementById("accPageId").value,
+          post_time_windows: ["11:00-13:00", "20:00-22:00"]
+        };
+        try {
+          var res = await fetch("/api/accounts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+          if (res.ok) {
+            document.getElementById("accountModal").close();
+            refreshAccountsConfig();
+            showNotice("✅ Account saved!");
+          } else {
+            showNotice("❌ Lỗi khi lưu account!", true);
+          }
+        } catch(e) {
+          showNotice("❌ Lỗi: " + e.message, true);
+        }
+      });
+
+      // JSON fallback toggle
+      document.getElementById("toggleJsonEditor").addEventListener("click", function() {
+        var fb = document.getElementById("jsonFallback");
+        fb.classList.toggle("show");
+        if (fb.classList.contains("show")) {
+          document.getElementById("runtimeConfigEditor").value = JSON.stringify(_currentConfigData, null, 2);
+          this.textContent = "🔧 Quay về giao diện trực quan";
+        } else {
+          try {
+            var parsed = JSON.parse(document.getElementById("runtimeConfigEditor").value);
+            renderDynamicConfig(parsed);
+          } catch(e) {}
+          this.textContent = "📝 Sửa bằng JSON thô";
+        }
+      });
+    }
+
+    function attachLogStream() {
+      var logBox = document.getElementById("logBox");
+      var alertBox = document.getElementById("errorAlerts");
+      var source = new EventSource("/api/logs/stream");
+      source.addEventListener("log", function(event) {
+        var line = document.createElement("div");
+        line.textContent = event.data;
+        logBox.prepend(line);
+        if (event.data.indexOf("[ERROR]") !== -1 || event.data.indexOf("[CRITICAL]") !== -1) {
+          var alertEl = document.createElement("div");
+          alertEl.className = "alert-item";
+          alertEl.textContent = event.data;
+          alertBox.prepend(alertEl);
+        }
+      });
+    }
+
+    function renderCountdown(nextWindowAt) {
+      var target = nextWindowAt ? new Date(nextWindowAt) : null;
+      var el = document.getElementById("nextWindowCountdown");
+      if (!target || isNaN(target.getTime())) { el.textContent = ""; return; }
+      var diffMs = target.getTime() - Date.now();
+      if (diffMs <= 0) { el.textContent = " | đang tới giờ"; return; }
+      var totalSeconds = Math.floor(diffMs / 1000);
+      var hours = Math.floor(totalSeconds / 3600);
+      var minutes = Math.floor((totalSeconds % 3600) / 60);
+      var seconds = totalSeconds % 60;
+      el.textContent = " | " + hours + "h " + minutes + "m " + seconds + "s";
+    }
+
+    // ─── Manual Post ───
+    (function() {
+      var resultEl = document.getElementById("manualPostResult");
+
+      function showResult(html, isOk) {
+        resultEl.style.display = "block";
+        resultEl.className = "validate-result " + (isOk ? "valid" : "invalid");
+        resultEl.innerHTML = html;
+      }
+
+      document.getElementById("manualValidateBtn").addEventListener("click", async function() {
+        var url = document.getElementById("manualPostUrl").value.trim();
+        if (!url) { showResult("❌ Nhập URL trước", false); return; }
+        showResult("Đang kiểm tra...", true);
+        try {
+          var res = await fetch("/api/shopee/validate-url", {
+            method: "POST", headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({url: url})
+          });
+          var data = await res.json();
+          if (data.valid) showResult("✅ URL hợp lệ — Shop: <strong>" + data.shop_id + "</strong> · Item: <strong>" + data.item_id + "</strong>", true);
+          else showResult("❌ " + data.reason, false);
+        } catch(e) { showResult("❌ " + e.message, false); }
+      });
+
+      document.getElementById("manualPostBtn").addEventListener("click", async function() {
+        var url = document.getElementById("manualPostUrl").value.trim();
+        var account = document.getElementById("manualPostAccount").value;
+        if (!url) { showResult("❌ Nhập URL sản phẩm Shopee", false); return; }
+        this.disabled = true;
+        this.textContent = "⏳ Đang xử lý...";
+        showResult("⏳ Đang tạo nội dung và đăng bài — có thể mất 30–60 giây...", true);
+        try {
+          var res = await fetch("/api/posts/manual", {
+            method: "POST", headers: {"Content-Type":"application/json"},
+            body: JSON.stringify({url: url, account_id: account})
+          });
+          var data = await res.json();
+          if (data.success) {
+            var fbUrl = "https://www.facebook.com/" + data.fb_post_id.replace("_", "/posts/");
+            showResult('✅ Đăng thành công! <strong>' + (data.title || "") + '</strong><br>'
+              + '<a href="' + fbUrl + '" target="_blank" class="link-btn fb-btn" style="margin-top:8px;display:inline-flex;">📘 Xem trên Facebook</a>'
+              + (data.affiliate_link ? ' <a href="' + data.affiliate_link + '" target="_blank" class="link-btn aff-btn" style="margin-top:8px;display:inline-flex;">🛒 Affiliate Link</a>' : ''),
+              true);
+            refreshPosts(); refreshCounts();
+          } else {
+            showResult("❌ " + (data.error || "Lỗi không xác định"), false);
+          }
+        } catch(e) { showResult("❌ " + e.message, false); }
+        finally {
+          this.disabled = false;
+          this.textContent = "🚀 Đăng ngay";
+        }
+      });
+    })();
+
+    // ─── Init ───
+    setClock();
+    renderStatus(initialStatus, initialKpi);
+    renderPosts(initialPosts);
+    renderDynamicConfig(initialRuntimeConfig);
+    renderAccountsConfig(initialAccountsConfig);
+    refreshImprovement();
+    refreshDailyPlan();
+    bindActions();
+    attachLogStream();
+    setInterval(setClock, 1000);
+    setInterval(refreshStatus, 10000);
+    setInterval(refreshPosts, 30000);
+    setInterval(refreshCounts, 30000);
+    setInterval(refreshImprovement, 60000);
+    setInterval(refreshDailyPlan, 60000);
+    setInterval(function() { renderCountdown(document.getElementById("nextWindowAt").textContent); }, 1000);
+  </script>
+
+</body>
+</html>

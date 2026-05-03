@@ -1,0 +1,100 @@
+﻿runtime:
+  execution_mode: "local"
+  local_queue_workers: 4
+
+web:
+  host: "0.0.0.0"
+  port: 8080
+  log_level: "info"
+
+shopee:
+  rate_limit_per_second: 30
+  degraded_rate_limit_per_second: 5
+  proxy_rotate_every: 75
+  min_product_score: 30
+  image_min_width: 400
+  max_products_per_cycle: 80
+  search_terms_per_category: 4
+  crawler_headless: true
+  request_timeout_seconds: 30
+  affiliate_cache_ttl_hours: 24
+  affiliate_auth_mode: bearer
+
+meta:
+  window_a_start: "11:00"
+  window_a_end: "13:00"
+  window_b_start: "20:00"
+  window_b_end: "22:00"
+  graph_api_version: "v23.0"
+  verify_before_window_minutes: 10
+  token_refresh_days_before_expiry: 5
+  publish_mode: "publish"
+  require_human_approval: false
+  recent_post_refresh_hours: 24
+
+kpi:
+  posts_per_day: 20
+  posts_per_account: 7
+  min_product_score: 30
+  max_same_category: 3
+  draft_buffer: 25
+
+memory:
+  compact_trigger_hour: 1
+  max_context_tokens: 80000
+  snapshot_retention_days: 90
+  collection_name: "agent_insights"
+
+loop:
+  crawl_start_hour: 6
+  cleanup_start_hour: 0
+  idle_crawl: true
+  improvement_sync_hours: 4
+
+storage:
+  sqlite_path: "data/post_farm.db"
+  log_dir: "logs"
+  temp_dir: "tmp"
+  asset_retention_days: 30
+  temp_retention_hours: 24
+  processed_command_retention_days: 14
+
+features:
+  auto_reply_enabled: false
+  comment_monitoring_enabled: true
+  download_assets: true
+  fun_post_enabled: true
+  fun_post_probability: 0.20
+  fun_post_types:
+    - meme
+    - tip
+
+ai:
+  enabled: true
+  provider: "openai"
+  model: "claude-sonnet-4-6"
+  max_daily_requests: 200
+  max_daily_input_tokens: 1000000
+  max_daily_output_tokens: 200000
+  analyzer_max_tokens: 500
+  writer_max_tokens: 900
+  score_top_products_per_cycle: 10
+  write_top_posts_per_cycle: 6
+  scorer_cache_ttl_hours: 24
+  writer_cache_ttl_hours: 72
+
+integrations:
+  redis_url: "redis://redis:6379/0"
+  ai_base_url: ""
+  ai_api_key: ""
+  shopee_affiliate_token: ""
+  shopee_affiliate_credential: ""
+  shopee_affiliate_secret: ""
+  shopee_affiliate_cookie: ""
+  shopee_publisher_id: ""
+  shopee_sub_id_prefix: "shopee-agent"
+  proxy_list: []
+  meta_app_id: ""
+  meta_app_secret: ""
+  public_base_url: ""
+  web_secret_key: ""

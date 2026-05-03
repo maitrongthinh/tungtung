@@ -1,0 +1,72 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Database files (dữ liệu runtime — không commit)
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Logs
+logs/
+*.log
+
+# Farm data (bài viết đã tạo, assets ảnh)
+farm/assets/
+farm/drafts/
+farm/published/
+farm/scheduled/
+farm/failed/
+
+# Memory & snapshots (ChromaDB, snapshots runtime)
+memory/chroma_db/
+memory/snapshots/
+memory/daily_plan.md
+
+# Config chứa dữ liệu nhạy cảm (cookies, API keys, runtime state)
+# runtime_config.json được commit vì chứa cấu hình mặc định (không có secrets)
+# Nếu bạn muốn gitignore hoàn toàn: bỏ comment dòng dưới
+# memory/runtime_config.json
+
+# Accounts (chứa token Facebook — tuyệt đối không commit)
+accounts/*.json
+accounts/*.yaml
+accounts/*.yml
+
+# Zip archives
+*.zip
+
+# Temp files
+tmp/
+*.tmp
+*.temp
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/

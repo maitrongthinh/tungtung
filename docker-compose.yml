@@ -1,0 +1,74 @@
+﻿version: '3.8'
+services:
+  agent:
+    build: .
+    restart: always
+    command: python -m core.loop_controller
+    volumes:
+      - ./farm:/opt/shopee-agent/farm
+      - ./memory:/opt/shopee-agent/memory
+      - ./accounts:/opt/shopee-agent/accounts
+      - ./data:/opt/shopee-agent/data
+      - ./logs:/opt/shopee-agent/logs
+    env_file: .env
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"from pathlib import Path; import sys; sys.exit(0 if Path('/opt/shopee-agent/config.yaml').exists() else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  worker:
+    build: .
+    restart: always
+    command: python -m core.worker
+    volumes:
+      - ./farm:/opt/shopee-agent/farm
+      - ./memory:/opt/shopee-agent/memory
+      - ./accounts:/opt/shopee-agent/accounts
+      - ./data:/opt/shopee-agent/data
+      - ./logs:/opt/shopee-agent/logs
+    env_file: .env
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import importlib; import sys; sys.exit(0 if importlib.import_module('core.worker') else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  web:
+    build: .
+    restart: always
+    command: python -m web.main
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./farm:/opt/shopee-agent/farm
+      - ./memory:/opt/shopee-agent/memory
+      - ./accounts:/opt/shopee-agent/accounts
+      - ./data:/opt/shopee-agent/data
+      - ./logs:/opt/shopee-agent/logs
+    env_file: .env
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  redis_data:

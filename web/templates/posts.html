@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Posts — Shopee Agent</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <nav class="topnav">
+    <a href="/" class="nav-brand">Shopee Agent</a>
+    <div class="nav-links">
+      <a href="/">Dashboard</a>
+      <a href="/posts" class="active">Posts</a>
+      <a href="/chat">Chat AI</a>
+      <a href="/config">Config</a>
+      <a href="/activity">Activity</a>
+    </div>
+  </nav>
+
+  <main class="page">
+    <div class="row between wrap" style="margin-bottom:20px;">
+      <div>
+        <h1 class="page-title">Bài viết đã đăng</h1>
+        <p class="muted">Tất cả bài viết — click vào card để xem chi tiết & link Facebook</p>
+      </div>
+      <div class="row" style="gap:8px;">
+        <input type="text" id="searchInput" placeholder="🔍 Tìm kiếm..." style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--text);min-width:220px;" />
+        <button id="btnSearch">Tìm</button>
+      </div>
+    </div>
+
+    <!-- Stats bar -->
+    <div class="stats-bar" id="statsBar">
+      <div class="stat-chip" id="statAll">All <span>{{ counts.all }}</span></div>
+      <div class="stat-chip active" data-status="" id="statFilter">
+        <button class="tab-pill active" data-status="">Tất cả</button>
+        <button class="tab-pill" data-status="published">Published</button>
+        <button class="tab-pill" data-status="scheduled">Scheduled</button>
+        <button class="tab-pill" data-status="draft">Draft</button>
+        <button class="tab-pill" data-status="failed">Failed</button>
+      </div>
+    </div>
+
+    <!-- Post grid -->
+    <div id="postGrid" class="post-grid">
+      <div class="loading-msg">Đang tải bài viết...</div>
+    </div>
+
+    <div id="loadMoreRow" style="text-align:center;margin-top:20px;display:none;">
+      <button id="btnLoadMore" class="btn-outline">Tải thêm</button>
+    </div>
+  </main>
+
+  <!-- Post detail modal -->
+  <dialog id="postModal">
+    <article style="padding:0;">
+      <div class="modal-header">
+        <h3 id="modalTitle">Post Detail</h3>
+        <button id="closeModal" class="btn-icon">✕</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </article>
+  </dialog>
+
+  <script>
+    var PAGE_SIZE = 30;
+    var currentStatus = "";
+    var currentOffset = 0;
+    var allPosts = [];
+
+    // ─── Fetch posts ───
+    async function loadPosts(reset) {
+      if (reset) { currentOffset = 0; allPosts = []; }
+      var params = new URLSearchParams({ limit: PAGE_SIZE });
+      if (currentStatus) params.set("status", currentStatus);
+      var q = document.getElementById("searchInput").value.trim();
+      if (q) params.set("q", q);
+      try {
+        var res = await fetch("/api/posts?" + params.toString());
+        var data = await res.json();
+        allPosts = reset ? data : allPosts.concat(data);
+        renderGrid(allPosts);
+        document.getElementById("loadMoreRow").style.display = data.length >= PAGE_SIZE ? "block" : "none";
+      } catch(e) { console.error(e); }
+    }
+
+    function renderGrid(posts) {
+      var grid = document.getElementById("postGrid");
+      if (!posts.length) {
+        grid.innerHTML = '<div class="empty-state"><div class="empty-icon">📭</div><p>Không có bài viết nào</p></div>';
+        return;
+      }
+      grid.innerHTML = posts.map(function(p) {
+        var statusClass = { published: "s-pub", scheduled: "s-sch", draft: "s-dra", failed: "s-fail" }[p.status] || "s-dra";
+        var fbUrl = p.fb_post_id ? "https://www.facebook.com/" + p.fb_post_id.replace("_", "/posts/") : "";
+        var affiliateLink = (p.content && p.content.affiliate_link) || "";
+        var clicks = (p.performance && p.performance.clicks) || 0;
+        var likes  = (p.performance && p.performance.likes)  || 0;
+        var shares = (p.performance && p.performance.shares) || 0;
+        var date = p.published_at || p.scheduled_at || p.created_at || "";
+        if (date) date = date.substring(0, 16).replace("T", " ");
+        var img = p.image_path ? '/api/posts/' + p.post_id + '/image' : '';
+        return '<article class="pcard" data-id="' + p.post_id + '">'
+          + (img ? '<div class="pcard-img"><img src="' + img + '" alt="" loading="lazy" onerror="this.parentNode.style.display=\'none\'" /></div>' : '')
+          + '<div class="pcard-body">'
+          + '<div class="pcard-top">'
+          + '<span class="pstatus ' + statusClass + '">' + p.status + '</span>'
+          + '<span class="pcard-account">' + p.account + '</span>'
+          + '</div>'
+          + '<div class="pcard-title">' + escHtml(p.content ? p.content.title : "") + '</div>'
+          + '<div class="pcard-product muted">' + escHtml(p.product ? p.product.name : "") + '</div>'
+          + '<div class="pcard-meta muted">' + date + (p.product ? ' · ' + p.product.category : '') + '</div>'
+          + '<div class="pcard-stats">'
+          + '<span title="Clicks">👆 ' + clicks + '</span>'
+          + '<span title="Likes">❤️ ' + likes + '</span>'
+          + '<span title="Shares">🔁 ' + shares + '</span>'
+          + '</div>'
+          + '<div class="pcard-links">'
+          + (fbUrl ? '<a href="' + fbUrl + '" target="_blank" class="link-btn fb-btn" onclick="event.stopPropagation()">📘 Facebook</a>' : '<span class="muted" style="font-size:0.78rem;">Chưa đăng</span>')
+          + (affiliateLink ? '<a href="' + affiliateLink + '" target="_blank" class="link-btn aff-btn" onclick="event.stopPropagation()">🛒 Shopee</a>' : '')
+          + '</div>'
+          + '</div>'
+          + '</article>';
+      }).join("");
+      grid.querySelectorAll(".pcard").forEach(function(card) {
+        card.addEventListener("click", function() { openPost(card.dataset.id); });
+      });
+    }
+
+    function escHtml(str) {
+      return String(str || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    }
+
+    // ─── Modal ───
+    async function openPost(id) {
+      try {
+        var res = await fetch("/api/posts/" + id);
+        var p = await res.json();
+        document.getElementById("modalTitle").textContent = (p.content && p.content.title) || "Post Detail";
+        var fbUrl = p.fb_post_id ? "https://www.facebook.com/" + p.fb_post_id.replace("_", "/posts/") : "";
+        var affiliateLink = (p.content && p.content.affiliate_link) || "";
+        var html = '<div class="modal-section">'
+          + '<div class="detail-row"><strong>Account:</strong> ' + escHtml(p.account) + '</div>'
+          + '<div class="detail-row"><strong>Status:</strong> <span class="pstatus ' + ({ published:"s-pub", scheduled:"s-sch", draft:"s-dra", failed:"s-fail" }[p.status]||"s-dra") + '">' + p.status + '</span></div>'
+          + (p.published_at ? '<div class="detail-row"><strong>Đăng lúc:</strong> ' + p.published_at.replace("T"," ").substring(0,16) + '</div>' : '')
+          + '</div>'
+          + '<div class="modal-section">'
+          + '<div class="detail-label">Nội dung bài</div>'
+          + '<div class="post-body-preview">' + escHtml((p.content && p.content.body) || "") + '</div>'
+          + '</div>'
+          + '<div class="modal-section">'
+          + '<div class="detail-label">Hashtags</div>'
+          + '<div>' + ((p.content && p.content.hashtags) || []).map(function(h){ return '<span class="htag">' + escHtml(h) + '</span>'; }).join(" ") + '</div>'
+          + '</div>'
+          + '<div class="modal-section link-section">'
+          + (fbUrl ? '<a href="' + fbUrl + '" target="_blank" class="link-btn fb-btn big">📘 Xem trên Facebook</a>' : '<span class="muted">Chưa có FB post ID</span>')
+          + (affiliateLink ? '<a href="' + affiliateLink + '" target="_blank" class="link-btn aff-btn big">🛒 Link Affiliate Shopee</a>' : '')
+          + '</div>'
+          + '<div class="modal-section">'
+          + '<div class="detail-label">Hiệu suất</div>'
+          + '<div class="perf-grid">'
+          + '<div class="perf-item"><span class="perf-val">' + ((p.performance && p.performance.clicks)||0) + '</span><span class="perf-key">Clicks</span></div>'
+          + '<div class="perf-item"><span class="perf-val">' + ((p.performance && p.performance.likes)||0) + '</span><span class="perf-key">Likes</span></div>'
+          + '<div class="perf-item"><span class="perf-val">' + ((p.performance && p.performance.comments)||0) + '</span><span class="perf-key">Comments</span></div>'
+          + '<div class="perf-item"><span class="perf-val">' + ((p.performance && p.performance.shares)||0) + '</span><span class="perf-key">Shares</span></div>'
+          + '<div class="perf-item"><span class="perf-val">' + ((p.performance && p.performance.reach)||0) + '</span><span class="perf-key">Reach</span></div>'
+          + '</div>'
+          + '</div>'
+          + '<div class="modal-section">'
+          + '<div class="detail-label">Sản phẩm</div>'
+          + '<div class="detail-row"><strong>Tên:</strong> ' + escHtml((p.product && p.product.name)||"") + '</div>'
+          + '<div class="detail-row"><strong>Giá:</strong> ' + ((p.product && p.product.price)||0).toLocaleString() + 'đ</div>'
+          + '<div class="detail-row"><strong>Giảm:</strong> ' + ((p.product && p.product.discount_percent)||0) + '%</div>'
+          + '<div class="detail-row"><strong>Category:</strong> ' + escHtml((p.product && p.product.category)||"") + '</div>'
+          + '</div>';
+        if (p.error_message) {
+          html += '<div class="modal-section"><div class="detail-label" style="color:var(--danger)">Lỗi</div><div class="error-msg">' + escHtml(p.error_message) + '</div></div>';
+        }
+        document.getElementById("modalBody").innerHTML = html;
+        document.getElementById("postModal").showModal();
+      } catch(e) { console.error(e); }
+    }
+
+    // ─── Events ───
+    document.querySelectorAll(".tab-pill").forEach(function(btn) {
+      btn.addEventListener("click", function(e) {
+        e.stopPropagation();
+        document.querySelectorAll(".tab-pill").forEach(function(b){ b.classList.remove("active"); });
+        btn.classList.add("active");
+        currentStatus = btn.dataset.status;
+        loadPosts(true);
+      });
+    });
+
+    document.getElementById("btnSearch").addEventListener("click", function() { loadPosts(true); });
+    document.getElementById("searchInput").addEventListener("keydown", function(e) {
+      if (e.key === "Enter") loadPosts(true);
+    });
+    document.getElementById("btnLoadMore").addEventListener("click", function() {
+      currentOffset += PAGE_SIZE;
+      loadPosts(false);
+    });
+    document.getElementById("closeModal").addEventListener("click", function() {
+      document.getElementById("postModal").close();
+    });
+
+    loadPosts(true);
+  </script>
+</body>
+</html>

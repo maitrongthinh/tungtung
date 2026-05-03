@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Chat AI — Shopee Agent</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <nav class="topnav">
+    <a href="/" class="nav-brand">Shopee Agent</a>
+    <div class="nav-links">
+      <a href="/">Dashboard</a>
+      <a href="/posts">Posts</a>
+      <a href="/chat" class="active">Chat AI</a>
+      <a href="/config">Config</a>
+      <a href="/activity">Activity</a>
+    </div>
+  </nav>
+
+  <main class="page chat-page">
+    <div class="chat-container">
+      <div class="chat-header">
+        <div>
+          <h2>Chat AI Analytics</h2>
+          <p class="muted">Hỏi về hiệu suất bài viết, xu hướng, gợi ý cải thiện</p>
+        </div>
+        <button id="btnClear" class="btn-outline">Xoá lịch sử</button>
+      </div>
+
+      <!-- Suggested prompts -->
+      <div class="suggest-row" id="suggestRow">
+        <button class="suggest-btn" data-q="Hôm nay đăng bao nhiêu bài? Hiệu suất thế nào?">📊 Hiệu suất hôm nay</button>
+        <button class="suggest-btn" data-q="Category nào đang perform tốt nhất?">🏆 Category tốt nhất</button>
+        <button class="suggest-btn" data-q="Gợi ý cải thiện nội dung bài viết để tăng clicks">💡 Gợi ý cải thiện</button>
+        <button class="suggest-btn" data-q="Giờ đăng nào có engagement cao nhất?">⏰ Giờ đăng tốt nhất</button>
+        <button class="suggest-btn" data-q="Bài viết nào có nhiều clicks nhất? Phân tích xem tại sao">🔥 Bài viết viral</button>
+      </div>
+
+      <!-- Messages -->
+      <div id="chatMessages" class="chat-messages">
+        <div class="chat-msg ai">
+          <div class="msg-avatar">🤖</div>
+          <div class="msg-bubble">
+            Xin chào! Mình là AI phân tích hiệu suất cho hệ thống đăng bài Shopee affiliate.<br><br>
+            Bạn có thể hỏi mình về:<br>
+            • Hiệu suất bài viết (clicks, likes, reach)<br>
+            • Category nào đang tốt<br>
+            • Gợi ý cải thiện nội dung<br>
+            • Lịch đăng bài tối ưu
+          </div>
+        </div>
+      </div>
+
+      <!-- Input -->
+      <div class="chat-input-row">
+        <textarea id="chatInput" class="chat-input" placeholder="Nhập câu hỏi..." rows="1"></textarea>
+        <button id="btnSend" class="send-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    var chatHistory = [];
+
+    function escHtml(s) {
+      return String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    function mdToHtml(text) {
+      return escHtml(text)
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        .replace(/\n/g, '<br>');
+    }
+
+    function appendMsg(role, text, isLoading) {
+      var box = document.getElementById("chatMessages");
+      var div = document.createElement("div");
+      div.className = "chat-msg " + (role === "user" ? "user" : "ai");
+      if (isLoading) div.id = "loadingMsg";
+      div.innerHTML = (role !== "user" ? '<div class="msg-avatar">🤖</div>' : '')
+        + '<div class="msg-bubble">' + (isLoading ? '<span class="typing-dot"></span><span class="typing-dot"></span><span class="typing-dot"></span>' : mdToHtml(text)) + '</div>'
+        + (role === "user" ? '<div class="msg-avatar user-av">👤</div>' : '');
+      box.appendChild(div);
+      box.scrollTop = box.scrollHeight;
+      return div;
+    }
+
+    async function sendMessage(text) {
+      if (!text.trim()) return;
+      document.getElementById("suggestRow").style.display = "none";
+      appendMsg("user", text);
+      chatHistory.push({ role: "user", content: text });
+      document.getElementById("chatInput").value = "";
+      document.getElementById("chatInput").style.height = "auto";
+      var loadingEl = appendMsg("ai", "", true);
+
+      try {
+        var res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: text, history: chatHistory.slice(-10) })
+        });
+        var data = await res.json();
+        loadingEl.remove();
+        if (data.error) {
+          appendMsg("ai", "❌ Lỗi: " + data.error);
+        } else {
+          appendMsg("ai", data.reply);
+          chatHistory.push({ role: "assistant", content: data.reply });
+        }
+      } catch(e) {
+        loadingEl.remove();
+        appendMsg("ai", "❌ Không thể kết nối server.");
+      }
+    }
+
+    document.getElementById("btnSend").addEventListener("click", function() {
+      sendMessage(document.getElementById("chatInput").value);
+    });
+
+    document.getElementById("chatInput").addEventListener("keydown", function(e) {
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(this.value); }
+      this.style.height = "auto";
+      this.style.height = Math.min(this.scrollHeight, 140) + "px";
+    });
+
+    document.querySelectorAll(".suggest-btn").forEach(function(btn) {
+      btn.addEventListener("click", function() { sendMessage(btn.dataset.q); });
+    });
+
+    document.getElementById("btnClear").addEventListener("click", function() {
+      chatHistory = [];
+      document.getElementById("chatMessages").innerHTML = '<div class="chat-msg ai"><div class="msg-avatar">🤖</div><div class="msg-bubble">Chat đã được xoá. Hỏi gì cũng được nha!</div></div>';
+      document.getElementById("suggestRow").style.display = "flex";
+    });
+  </script>
+</body>
+</html>
