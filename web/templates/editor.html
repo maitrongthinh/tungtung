@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Editor - Shopee Agent</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <nav class="topnav">
+    <a href="/" class="nav-brand">Shopee Agent</a>
+    <div class="nav-links">
+      <a href="/">Dashboard</a>
+      <a href="/posts">Posts</a>
+      <a href="/chat">Chat AI</a>
+      <a href="/config">Config</a>
+      <a href="/editor" class="active">Editor</a>
+      <a href="/activity">Activity</a>
+    </div>
+  </nav>
+
+  <main class="page">
+    <header class="header">
+      <div>
+        <h1>Editor</h1>
+        <p class="muted">Chinh sua Daily Plan va Improvement - luu lai de bot hoc hoi tot hon</p>
+      </div>
+    </header>
+
+    <!-- Daily Plan Editor -->
+    <section class="panel">
+      <div class="row between wrap" style="margin-bottom:12px;">
+        <h2>📋 Daily Plan</h2>
+        <div class="row" style="gap:8px;">
+          <button onclick="regeneratePlan()" class="btn-info">🔄 Regenerate</button>
+          <button onclick="savePlan()">💾 Save</button>
+        </div>
+      </div>
+      <p class="muted" style="margin-bottom:8px;">Ke hoach ngay - bot se doc file nay moi sang de biet phai lam gi. Ban co the chinh sua truc tiep.</p>
+      <textarea id="planEditor" rows="20" style="width:100%;font-family:monospace;font-size:0.88rem;resize:vertical;"></textarea>
+      <div id="planStatus" class="muted mt12"></div>
+    </section>
+
+    <!-- Improvement Editor -->
+    <section class="panel">
+      <div class="row between wrap" style="margin-bottom:12px;">
+        <h2>📈 Improvement Log</h2>
+        <div class="row" style="gap:8px;">
+          <button onclick="analyzeImprovement()" class="btn-info">🧠 Auto-Analyze</button>
+          <button onclick="loadSuggestions()" class="btn-info">💡 Suggestions</button>
+          <button onclick="saveImprovement()">💾 Save</button>
+        </div>
+      </div>
+      <p class="muted" style="margin-bottom:8px;">Bot doc file nay de hoi uu hoa noi dung, category, va cach lam viec. Chinh sua de bot hoc theo y ban.</p>
+      
+      <!-- Suggestions Panel -->
+      <div id="suggestionsPanel" style="display:none;margin-bottom:12px;padding:12px;background:var(--surface2);border-radius:8px;border-left:3px solid var(--primary);">
+        <h3 style="margin-bottom:8px;">💡 AI Suggestions</h3>
+        <div id="suggestionsContent"></div>
+      </div>
+      
+      <textarea id="improvementEditor" rows="30" style="width:100%;font-family:monospace;font-size:0.88rem;resize:vertical;"></textarea>
+      <div id="improvementStatus" class="muted mt12"></div>
+    </section>
+
+    <!-- Quick Tips -->
+    <section class="panel" style="border-left:3px solid var(--warn);">
+      <h2>📌 Cach dung hieu qua</h2>
+      <div class="muted" style="line-height:1.8;">
+        <p><strong>Daily Plan:</strong> Bot doc moi sang luc 6:00. Ghi ro category uu tien, so luong bai, target cu the.</p>
+        <p><strong>Category Watch List:</strong> Them/xoa category de bot biet nen crawl gi. Moi dong 1 category.</p>
+        <p><strong>Improvement - Tang uu tien:</strong> Category nao dang ban chay, de o day de bot uu tien.</p>
+        <p><strong>Improvement - Giam uu tien:</strong> Category khong hieu qua, bot se giam crawl.</p>
+        <p><strong>Blacklist:</strong> San pham/tu khoa nao khong muon xuat hien, dat vao blacklist.</p>
+        <p><strong>Lessons Learned:</strong> Ghi nhan kinh nghiem de bot hoc va cai thien dan.</p>
+        <p><strong>Auto-Analyze:</strong> Nut nay se tu dong phan tich data 7 ngay va cap nhat improvement.</p>
+        <p><strong>Suggestions:</strong> Nut nay se dua ra goi y cai thien dua tren data thuc te.</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // Load both files on page load
+    async function loadFiles() {
+      try {
+        const [planR, impR] = await Promise.all([
+          fetch('/api/daily-plan'),
+          fetch('/api/improvement')
+        ]);
+        document.getElementById('planEditor').value = await planR.text();
+        document.getElementById('improvementEditor').value = await impR.text();
+      } catch(e) {
+        console.error('Load failed:', e);
+      }
+    }
+
+    // Save daily plan
+    async function savePlan() {
+      const content = document.getElementById('planEditor').value;
+      const status = document.getElementById('planStatus');
+      try {
+        const r = await fetch('/api/daily-plan', {
+          method: 'PUT',
+          headers: {'Content-Type': 'text/plain'},
+          body: content
+        });
+        const d = await r.json();
+        if (d.saved) {
+          status.innerHTML = '<span style="color:var(--success);">Da luu daily_plan.md (' + d.chars + ' ky tu)</span>';
+        } else {
+          status.innerHTML = '<span style="color:var(--danger);">Loi: ' + (d.error || 'unknown') + '</span>';
+        }
+      } catch(e) {
+        status.innerHTML = '<span style="color:var(--danger);">Loi ket noi: ' + e.message + '</span>';
+      }
+      setTimeout(() => status.innerHTML = '', 5000);
+    }
+
+    // Save improvement
+    async function saveImprovement() {
+      const content = document.getElementById('improvementEditor').value;
+      const status = document.getElementById('improvementStatus');
+      try {
+        const r = await fetch('/api/improvement', {
+          method: 'PUT',
+          headers: {'Content-Type': 'text/plain'},
+          body: content
+        });
+        const d = await r.json();
+        if (d.saved) {
+          status.innerHTML = '<span style="color:var(--success);">Da luu improvement.md (' + d.chars + ' ky tu)</span>';
+        } else {
+          status.innerHTML = '<span style="color:var(--danger);">Loi: ' + (d.error || 'unknown') + '</span>';
+        }
+      } catch(e) {
+        status.innerHTML = '<span style="color:var(--danger);">Loi ket noi: ' + e.message + '</span>';
+      }
+      setTimeout(() => status.innerHTML = '', 5000);
+    }
+
+    // Regenerate daily plan
+    async function regeneratePlan() {
+      const status = document.getElementById('planStatus');
+      status.innerHTML = 'Dang tao lai ke hoach...';
+      try {
+        const r = await fetch('/api/daily-plan/regenerate', {method: 'POST'});
+        const d = await r.json();
+        if (d.regenerated) {
+          document.getElementById('planEditor').value = d.content;
+          status.innerHTML = '<span style="color:var(--success);">Da tao lai ke hoach tu data hien tai</span>';
+        } else {
+          status.innerHTML = '<span style="color:var(--danger);">Loi: ' + (d.error || 'unknown') + '</span>';
+        }
+      } catch(e) {
+        status.innerHTML = '<span style="color:var(--danger);">Loi: ' + e.message + '</span>';
+      }
+      setTimeout(() => status.innerHTML = '', 5000);
+    }
+
+    // Auto-analyze improvement
+    async function analyzeImprovement() {
+      const status = document.getElementById('improvementStatus');
+      status.innerHTML = 'Dang phan tich data 7 ngay...';
+      try {
+        const r = await fetch('/api/improvement/analyze', {method: 'POST'});
+        const d = await r.json();
+        if (d.analyzed) {
+          // Reload the full file
+          const impR = await fetch('/api/improvement');
+          document.getElementById('improvementEditor').value = await impR.text();
+          status.innerHTML = '<span style="color:var(--success);">Da phan tich va cap nhat improvement.md</span>';
+        } else {
+          status.innerHTML = '<span style="color:var(--danger);">Loi: ' + (d.error || 'unknown') + '</span>';
+        }
+      } catch(e) {
+        status.innerHTML = '<span style="color:var(--danger);">Loi: ' + e.message + '</span>';
+      }
+      setTimeout(() => status.innerHTML = '', 5000);
+    }
+
+    // Load suggestions
+    async function loadSuggestions() {
+      const panel = document.getElementById('suggestionsPanel');
+      const content = document.getElementById('suggestionsContent');
+      panel.style.display = 'block';
+      content.innerHTML = '<span class="muted">Dang phan tich...</span>';
+      try {
+        const r = await fetch('/api/improvement/suggestions');
+        const d = await r.json();
+        if (d.suggestions && d.suggestions.length > 0) {
+          let html = '<ul style="margin:0;padding-left:20px;">';
+          for (const s of d.suggestions) {
+            html += '<li style="margin-bottom:6px;">' + s + '</li>';
+          }
+          html += '</ul>';
+          html += '<div class="muted mt12">Data: ' + d.data_period + ' | ' + d.total_posts + ' bai | ' + d.total_clicks + ' clicks</div>';
+          content.innerHTML = html;
+        } else {
+          content.innerHTML = '<span class="muted">Khong co goi y. Can them data.</span>';
+        }
+      } catch(e) {
+        content.innerHTML = '<span style="color:var(--danger);">Loi: ' + e.message + '</span>';
+      }
+    }
+
+    // Init
+    loadFiles();
+  </script>
+</body>
+</html>

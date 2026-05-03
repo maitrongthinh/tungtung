@@ -172,6 +172,11 @@ async def config_page(request: Request) -> HTMLResponse:
     )
 
 
+@app.get("/editor", response_class=HTMLResponse)
+async def editor_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(request, "editor.html", {})
+
+
 # -- Login / Session Management --
 from datetime import timedelta
 
@@ -308,10 +313,160 @@ async def api_improvement() -> PlainTextResponse:
     return PlainTextResponse(content, media_type="text/markdown")
 
 
+@app.put("/api/improvement")
+async def api_improvement_update(request: Request) -> JSONResponse:
+    """Save edited improvement.md from web dashboard."""
+    await _require_auth(request)
+    if not _check_rate_limit("improvement_write", max_requests=10, window_seconds=60):
+        raise HTTPException(429, "Rate limited")
+    body = await request.body()
+    content = body.decode("utf-8").strip()
+    if not content:
+        return JSONResponse({"error": "Content is required"}, status_code=400)
+    from common.files import atomic_write_text
+    atomic_write_text(IMPROVEMENT_FILE, content)
+    logger.info("Improvement.md updated from web dashboard (%d chars)", len(content))
+    return JSONResponse({"saved": True, "chars": len(content)})
+
+
+@app.get("/api/improvement/suggestions")
+async def api_improvement_suggestions() -> JSONResponse:
+    """Auto-generate improvement suggestions based on recent data."""
+    from datetime import timedelta
+    now = datetime.now(UTC)
+    week_ago = now - timedelta(days=7)
+    from common.models import PostFilters
+    posts = database.list_posts(PostFilters(date_from=week_ago, status="published", limit=200))
+    if not posts:
+        return JSONResponse({"suggestions": ["Chua co du lieu du de phan tich. Hay cho 1-2 ngay."]})
+    
+    # Analyze top performing content patterns
+    sorted_posts = sorted(posts, key=lambda p: p.performance.clicks + p.performance.likes, reverse=True)
+    top5 = sorted_posts[:5]
+    bottom5 = sorted_posts[-5:]
+    
+    suggestions = []
+    
+    # Category analysis
+    from collections import Counter
+    cat_clicks = Counter()
+    cat_posts = Counter()
+    for p in posts:
+        cat_clicks[p.product.category] += p.performance.clicks
+        cat_posts[p.product.category] += 1
+    
+    if cat_clicks:
+        best_cat = cat_clicks.most_common(1)[0]
+        worst_cat = cat_clicks.most_common()[-1] if len(cat_clicks) > 1 else None
+        suggestions.append(f"Category '{best_cat[0]}' perform tot nhat: {best_cat[1]} clicks. Nen tang cuong.")
+        if worst_cat and worst_cat[1] == 0:
+            suggestions.append(f"Category '{worst_cat[0]}' co 0 click. Can xem xet bo hoac doi content.")
+    
+    # Hook analysis
+    if top5:
+        best_hook = top5[0].content.title[:50]
+        suggestions.append(f"Hook hieu qua nhat: '{best_hook}' - hoc theo pattern nay.")
+    
+    # Zero click analysis
+    zero_clicks = sum(1 for p in posts if p.performance.clicks == 0)
+    if zero_clicks > len(posts) * 0.3:
+        suggestions.append(f"{zero_clicks}/{len(posts)} bai co 0 click. Can cai thien hook va CTA.")
+    
+    # Time analysis
+    hour_clicks = Counter()
+    for p in posts:
+        if p.published_at:
+            hour_clicks[p.published_at.hour] += p.performance.clicks
+    if hour_clicks:
+        best_hour = hour_clicks.most_common(1)[0]
+        suggestions.append(f"Gio {best_hour[0]}:00 co nhieu click nhat ({best_hour[1]} clicks). Nen tap trung dang bai luc nay.")
+    
+    # Engagement
+    total_engagement = sum(p.performance.likes + p.performance.comments for p in posts)
+    avg_engagement = total_engagement / max(len(posts), 1)
+    if avg_engagement < 2:
+        suggestions.append("Engagement thap. Them cau hoi, poll, urgency vao CTA.")
+    
+    # Commission
+    high_commission = [p for p in posts if p.product.commission_rate >= 5]
+    if high_commission:
+        avg_clicks_high = sum(p.performance.clicks for p in high_commission) / len(high_commission)
+        suggestions.append(f"San pham commission >=5% co {avg_clicks_high:.1f} clicks/bai. Nen uu tien.")
+    
+    return JSONResponse({
+        "suggestions": suggestions,
+        "data_period": "7 ngay gan nhat",
+        "total_posts": len(posts),
+        "total_clicks": sum(p.performance.clicks for p in posts),
+    })
+
+
 @app.get("/api/daily-plan")
 async def api_daily_plan() -> PlainTextResponse:
     content = DAILY_PLAN_FILE.read_text(encoding="utf-8") if DAILY_PLAN_FILE.exists() else ""
     return PlainTextResponse(content, media_type="text/markdown")
+
+
+@app.put("/api/daily-plan")
+async def api_daily_plan_update(request: Request) -> JSONResponse:
+    """Save edited daily_plan.md from web dashboard."""
+    await _require_auth(request)
+    if not _check_rate_limit("plan_write", max_requests=10, window_seconds=60):
+        raise HTTPException(429, "Rate limited")
+    body = await request.body()
+    content = body.decode("utf-8").strip()
+    if not content:
+        return JSONResponse({"error": "Content is required"}, status_code=400)
+    from common.files import atomic_write_text
+    atomic_write_text(DAILY_PLAN_FILE, content)
+    logger.info("daily_plan.md updated from web dashboard (%d chars)", len(content))
+    return JSONResponse({"saved": True, "chars": len(content)})
+
+
+@app.post("/api/daily-plan/regenerate")
+async def api_daily_plan_regenerate(request: Request) -> JSONResponse:
+    """Force regenerate daily plan from current data."""
+    await _require_auth(request)
+    try:
+        from modules.memory.daily_planner import DailyPlanner
+        planner = DailyPlanner(database)
+        path = planner.generate()
+        content = path.read_text(encoding="utf-8")
+        return JSONResponse({"regenerated": True, "content": content})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.post("/api/improvement/analyze")
+async def api_improvement_analyze(request: Request) -> JSONResponse:
+    """Force run improvement analysis and update improvement.md."""
+    await _require_auth(request)
+    try:
+        from modules.memory.improvement_updater import ImprovementUpdater
+        from modules.revenue.tracker import RevenueTracker
+        
+        updater = ImprovementUpdater(database)
+        tracker = RevenueTracker(database)
+        top_cats = tracker.get_top_categories(days=7)
+        
+        # Get recent published posts
+        recent = database.list_recent_published_posts(hours=168, limit=200)
+        
+        updater.update(
+            posts=recent,
+            top_categories=[(c["category"], c["clicks"]) for c in top_cats[:5]],
+            audience_insights={
+                "best_hours": ", ".join(f"{h}:00" for h in tracker.get_best_posting_hours()),
+                "best_content_type": "deal review",
+                "triggers": ["hoi ve gia", "nhac sale ro rang", "call-to-action nhe"],
+            },
+            blacklist_products=[],
+            blacklist_keywords=[],
+        )
+        content = updater.load_text()
+        return JSONResponse({"analyzed": True, "content": content[:500]})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
 
 @app.get("/api/runtime-config")
