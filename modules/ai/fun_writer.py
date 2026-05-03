@@ -106,8 +106,8 @@ class FunContentWriter:
             system = (
                 "Bạn là người viết nội dung Facebook Gen Z, chuyên về meme mua sắm Shopee Việt Nam. "
                 "Phong cách: vui vẻ, relatable, dùng emoji vừa phải, tiếng Việt tự nhiên. "
-                "KHÔNG quảng cáo sản phẩm cụ thể, KHÔNG có affiliate link. "
-                "Chỉ nội dung giải trí để tăng engagement tự nhiên. "
+                "Nội dung giải trí để tăng engagement tự nhiên. "
+                "Có thể nhắc nhẹ nhàng về deal/shopee ở cuối bài (soft mention) nhưng KHÔNG hard-sell. "
                 "Trả về JSON: {title, body, hashtags (list 4-6), cta, post_type}"
             )
             user = (
@@ -121,8 +121,9 @@ class FunContentWriter:
             system = (
                 "Bạn là chuyên gia mua sắm Shopee chia sẻ tips thực tế cho người Việt. "
                 "Phong cách: hữu ích, ngắn gọn, dựa trên kinh nghiệm thực tế, tiếng Việt. "
-                "KHÔNG quảng cáo sản phẩm cụ thể. Chỉ chia sẻ kiến thức/mẹo. "
+                "Chia sẻ kiến thức/mẹo mua sắm. "
                 "Có thể đề cập generic về voucher, cách tìm deal, so sánh giá. "
+                "Cuối bài nên gợi ý nhẹ nhàng người đọc ghé page để xem deal hay. "
                 "Trả về JSON: {title, body, hashtags (list 4-6), cta, post_type}"
             )
             user = (

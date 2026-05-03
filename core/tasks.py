@@ -2,40 +2,69 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
+from typing import Any
 
 from common.logging import get_logger
 from common.queue import get_queue_stats
-from core.bootstrap import build_runtime
 
 logger = get_logger(__name__)
 
+# ── Singleton runtime to avoid rebuilding on every job ─────────
+_runtime_bundle: Any = None
+_runtime_lock = asyncio.Lock() if hasattr(asyncio, "Lock") else None
+
+
+def _get_runtime() -> Any:
+    """Return shared runtime bundle, creating it only once."""
+    global _runtime_bundle
+    if _runtime_bundle is None:
+        from core.bootstrap import build_runtime
+        _runtime_bundle = build_runtime()
+    return _runtime_bundle
+
+
+def _run_async(coro: Any) -> Any:
+    """Run an async coroutine safely, reusing existing event loop if available."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        # We are inside an event loop (e.g. APScheduler async context)
+        # Use a new thread to run the coroutine
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result()
+    return asyncio.run(coro)
+
 
 def prepare_cycle_job() -> None:
-    runtime = build_runtime()
+    runtime = _get_runtime()
     runtime.daily_planner.generate()
-    asyncio.run(runtime.orchestrator.run_cycle("full"))
+    _run_async(runtime.orchestrator.run_cycle("full"))
 
 
 def publish_cycle_job() -> None:
-    runtime = build_runtime()
-    asyncio.run(runtime.orchestrator.run_cycle("publish_only"))
+    runtime = _get_runtime()
+    _run_async(runtime.orchestrator.run_cycle("publish_only"))
 
 
 def wrap_up_cycle_job() -> None:
-    runtime = build_runtime()
-    asyncio.run(runtime.orchestrator.run_cycle("wrap_up"))
+    runtime = _get_runtime()
+    _run_async(runtime.orchestrator.run_cycle("wrap_up"))
 
 
 def compact_memory_job() -> None:
-    runtime = build_runtime()
+    runtime = _get_runtime()
     runtime.orchestrator.compactor.compact_day()
 
 
 def verify_pre_window_job() -> None:
-    runtime = build_runtime()
+    runtime = _get_runtime()
     accounts = runtime.session_manager.load_accounts()
-    health = asyncio.run(runtime.session_manager.verify_accounts(accounts))
-    proxy_details = asyncio.run(runtime.proxy_pool.health_check()) if runtime.proxy_pool.proxies else {}
+    health = _run_async(runtime.session_manager.verify_accounts(accounts))
+    proxy_details = _run_async(runtime.proxy_pool.health_check()) if runtime.proxy_pool.proxies else {}
     status = runtime.database.get_runtime_status()
     status.account_health = health
     status.proxy_health = {**runtime.proxy_pool.summary(), "details": proxy_details}
@@ -47,7 +76,7 @@ def verify_pre_window_job() -> None:
 
 
 def cleanup_storage_job() -> None:
-    runtime = build_runtime()
+    runtime = _get_runtime()
     runtime.daily_planner.generate()
     cleanup_result = runtime.farm_manager.cleanup_storage(
         asset_retention_days=runtime.settings.storage.asset_retention_days,
@@ -62,11 +91,11 @@ def cleanup_storage_job() -> None:
 
 def monitor_recent_posts_job() -> None:
     from core.orchestrator import CycleState
-    runtime = build_runtime()
+    runtime = _get_runtime()
     state = CycleState(mode="monitor")
-    asyncio.run(runtime.orchestrator.monitor_comments(state))
+    _run_async(runtime.orchestrator.monitor_comments(state))
 
 
 def sync_affiliate_links_job() -> None:
-    runtime = build_runtime()
-    asyncio.run(runtime.orchestrator.sync_affiliate_links())
+    runtime = _get_runtime()
+    _run_async(runtime.orchestrator.sync_affiliate_links())

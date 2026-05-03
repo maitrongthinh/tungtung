@@ -807,6 +807,47 @@ async def ai_key_stats() -> JSONResponse:
     return JSONResponse(get_key_pool_stats())
 
 
+@app.get("/api/revenue")
+async def api_revenue() -> JSONResponse:
+    """Revenue metrics: commission, orders, top earners."""
+    now = datetime.now(UTC)
+    # Get commission tracking events from activity log
+    commission_events = database.get_activity_log(limit=100, event_type="commission_tracking")
+    total_commission = 0.0
+    total_orders = 0
+    for event in commission_events:
+        detail = event.get("detail", {})
+        total_commission += detail.get("commission", 0.0)
+        total_orders += detail.get("orders", 0)
+    # Get published posts with click data for revenue estimation
+    published = database.list_recent_published_posts(hours=72, limit=100)
+    top_earners = []
+    for post in sorted(published, key=lambda p: p.performance.clicks, reverse=True)[:10]:
+        top_earners.append({
+            "post_id": post.post_id,
+            "product_name": post.product.name[:60],
+            "category": post.product.category,
+            "commission_rate": post.product.commission_rate,
+            "clicks": post.performance.clicks,
+            "likes": post.performance.likes,
+            "comments": post.performance.comments,
+            "published_at": post.published_at.isoformat() if post.published_at else None,
+        })
+    kpi = database.get_daily_kpi(now)
+    # Estimate revenue: clicks * avg conversion (2%) * avg commission
+    est_click_value = total_commission / max(total_orders, 1) if total_orders > 0 else 5000
+    estimated_revenue = kpi.get("clicks", 0) * 0.02 * est_click_value
+    return JSONResponse({
+        "tracked_commission": total_commission,
+        "tracked_orders": total_orders,
+        "estimated_daily_revenue": round(estimated_revenue),
+        "today_clicks": kpi.get("clicks", 0),
+        "today_posts": kpi.get("posts_published", 0),
+        "top_earners": top_earners,
+        "avg_commission_per_order": round(total_commission / max(total_orders, 1)),
+    })
+
+
 @app.post("/api/proxy/health")
 async def proxy_health_check() -> JSONResponse:
     from modules.shopee.proxy_pool import ProxyPool

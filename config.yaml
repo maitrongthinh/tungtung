@@ -97,4 +97,4 @@ integrations:
   meta_app_id: ""
   meta_app_secret: ""
   public_base_url: ""
-  web_secret_key: ""
+  web_secret_key: "CHANGE-ME-generate-with-secrets-token-urlsafe-32"

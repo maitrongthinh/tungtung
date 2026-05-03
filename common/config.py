@@ -237,8 +237,13 @@ def save_runtime_config(payload: dict[str, Any], config_path: str | Path | None 
     return load_settings(refresh=True)
 
 
-@lru_cache(maxsize=2)
-def _load_settings_cached(config_path_str: str) -> AppSettings:
+import time as _time
+
+_settings_cache: dict[str, tuple[float, AppSettings]] = {}
+_SETTINGS_TTL_SECONDS = 5.0  # Only re-read files every 5 seconds max
+
+
+def _load_settings_uncached(config_path_str: str) -> AppSettings:
     load_dotenv(BASE_DIR / ".env")
     path = Path(config_path_str) if config_path_str else BASE_DIR / "config.yaml"
     data: dict[str, Any] = {}
@@ -256,9 +261,20 @@ def _load_settings_cached(config_path_str: str) -> AppSettings:
     return settings
 
 
+def _load_settings_cached(config_path_str: str) -> AppSettings:
+    """TTL-based cache: only re-read files if TTL expired."""
+    now = _time.monotonic()
+    cached = _settings_cache.get(config_path_str)
+    if cached and (now - cached[0]) < _SETTINGS_TTL_SECONDS:
+        return cached[1]
+    settings = _load_settings_uncached(config_path_str)
+    _settings_cache[config_path_str] = (now, settings)
+    return settings
+
+
 def load_settings(config_path: str | Path | None = None, *, refresh: bool = False) -> AppSettings:
     if refresh:
-        _load_settings_cached.cache_clear()
+        _settings_cache.clear()
     path = str(Path(config_path).resolve()) if config_path else ""
     settings = _load_settings_cached(path)
     if not settings.integrations.web_secret_key:

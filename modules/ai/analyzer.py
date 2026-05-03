@@ -106,19 +106,36 @@ class ProductAnalyzer:
     ) -> float:
         score = 0.0
 
+        # Price competitiveness (max 20pts — reduced from 25)
         if product.price > 0:
             if category_average_price:
                 ratio = category_average_price / product.price
-                score += max(0.0, min(25.0, ratio * 12.0))
+                score += max(0.0, min(20.0, ratio * 10.0))
             else:
-                score += 10.0
+                score += 8.0
 
-        score += min(20.0, product.sold_count / 500)
-        score += min(20.0, (product.rating / 5.0) * 20.0)
-        score += min(15.0, product.discount_percent * 0.5)
-        score += 10.0 if product.image_path or product.images else 0.0
-        score += min(10.0, product.review_count / 200)
-        score += min(10.0, product.commission_rate * 2.0)
+        # Social proof (max 15pts — reduced from 20)
+        score += min(15.0, product.sold_count / 500)
+
+        # Rating quality (max 15pts — reduced from 20)
+        score += min(15.0, (product.rating / 5.0) * 15.0)
+
+        # Discount appeal (max 10pts — reduced from 15)
+        score += min(10.0, product.discount_percent * 0.4)
+
+        # Has images (5pts — reduced from 10)
+        score += 5.0 if product.image_path or product.images else 0.0
+
+        # Review volume (max 5pts — reduced from 10)
+        score += min(5.0, product.review_count / 200)
+
+        # COMMISSION RATE — CRITICAL FOR REVENUE (max 25pts — up from 10!)
+        # Higher commission = more money per sale
+        if product.commission_rate > 0:
+            score += min(25.0, product.commission_rate * 5.0)
+        else:
+            # Unknown commission — neutral, don't penalize
+            score += 5.0
 
         if improvement:
             trend_hits = sum(1 for item in improvement.watch_list_increase if item.lower() in product.category.lower())

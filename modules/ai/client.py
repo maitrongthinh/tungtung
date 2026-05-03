@@ -196,6 +196,23 @@ class JSONModelClient(Protocol):
     ) -> dict[str, Any]: ...
 
 
+# ── Reuse AsyncOpenAI clients per (key, base_url) ──────────────
+_client_cache: dict[str, AsyncOpenAI] = {}
+
+def _get_or_create_client(api_key: str, base_url: str) -> AsyncOpenAI:
+    cache_key = f"{api_key[-8:]}:{base_url}"
+    client = _client_cache.get(cache_key)
+    if client is None:
+        client = AsyncOpenAI(
+            api_key=api_key,
+            base_url=base_url if base_url else None,
+            timeout=90.0,
+            max_retries=0,
+        )
+        _client_cache[cache_key] = client
+    return client
+
+
 class OpenAIJSONClient:
     """
     Multi-provider AI client với key rotation tự động.
@@ -279,12 +296,7 @@ class OpenAIJSONClient:
         max_tokens: int,
         temperature: float,
     ) -> dict[str, Any]:
-        client = AsyncOpenAI(
-            api_key=ks.key,
-            base_url=ks.base_url if ks.base_url else None,
-            timeout=90.0,
-            max_retries=0,
-        )
+        client = _get_or_create_client(ks.key, ks.base_url)
         use_json_mode = (
             "gpt" in model.lower()
             and ks.base_url

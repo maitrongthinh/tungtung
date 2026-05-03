@@ -351,6 +351,42 @@ class AgentOrchestrator:
         state.published_posts = published
         return state
 
+    async def track_commissions(self) -> None:
+        """Pull affiliate commission data and log revenue metrics."""
+        try:
+            from datetime import timedelta
+            token = self.settings.integrations.shopee_affiliate_token
+            if not token:
+                return
+            published = self.database.list_recent_published_posts(hours=72, limit=50)
+            total_commission = 0.0
+            total_orders = 0
+            for post in published:
+                if not post.fb_post_id:
+                    continue
+                try:
+                    perf = await self.crawler.affiliate_api.get_product_performance(post.post_id)
+                    orders = perf.get("orders", 0)
+                    commission = perf.get("commission", 0.0)
+                    if orders > 0 or commission > 0:
+                        total_orders += orders
+                        total_commission += commission
+                        # Update post performance with revenue data
+                        post.performance.clicks = max(post.performance.clicks, orders)
+                        self.database.upsert_post(post)
+                except Exception:
+                    continue
+            if total_orders > 0:
+                self.database.log_activity(
+                    "commission_tracking",
+                    f"Doanh thu: {total_orders} don hang, {total_commission:,.0f}đ commission",
+                    phase="monitor",
+                    detail={"orders": total_orders, "commission": total_commission},
+                )
+                logger.info("Commission tracking: %d orders, %.0f VND", total_orders, total_commission)
+        except Exception as exc:
+            logger.warning("Commission tracking failed: %s", exc)
+
     async def monitor_comments(self, state: CycleState) -> CycleState:
         if not self.settings.features.comment_monitoring_enabled:
             return state
@@ -388,6 +424,8 @@ class AgentOrchestrator:
 
     async def compact_memory(self, state: CycleState) -> CycleState:
         self.compactor.compact_day()
+        # Track commissions during wrap-up
+        await self.track_commissions()
         return state
 
     def _choose_account(

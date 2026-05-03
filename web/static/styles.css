@@ -575,3 +575,87 @@ dialog article { padding: 24px; }
   .topnav { padding: 0 12px; }
   .suggest-btn { font-size: 0.75rem; padding: 6px 10px; }
 }
+
+/* ── Mobile Responsive ────────────────────────────────────── */
+@media (max-width: 768px) {
+  .page { padding: 12px; }
+  .header { flex-direction: column; align-items: flex-start; }
+  .header-side { text-align: left; }
+  .grid.two { grid-template-columns: 1fr; }
+  .topnav {
+    flex-direction: column;
+    gap: 4px;
+    padding: 8px 12px;
+  }
+  .nav-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .nav-links a { padding: 6px 10px; font-size: 0.82rem; }
+  .filters {
+    flex-direction: column;
+    gap: 6px;
+  }
+  .filters input, .filters select { width: 100%; }
+  .panel { padding: 14px; }
+  .post-list .post-card { flex-direction: column; }
+  .post-list .post-card img { max-width: 100%; }
+  .button-row { flex-wrap: wrap; }
+  .tab-row { overflow-x: auto; flex-wrap: nowrap; }
+  .tab { white-space: nowrap; padding: 6px 12px; font-size: 0.82rem; }
+  h1 { font-size: 1.25rem; }
+  h2 { font-size: 1.1rem; }
+  textarea, input[type="text"], input[type="url"] {
+    font-size: 16px; /* Prevent iOS zoom on focus */
+  }
+}
+
+@media (max-width: 480px) {
+  .page { padding: 8px; }
+  .panel { padding: 10px; margin-bottom: 10px; }
+  .nav-brand { font-size: 0.95rem; }
+}
+
+/* ── Toast Notifications ──────────────────────────────────── */
+.toast {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  color: #fff;
+  font-weight: 500;
+  font-size: 0.88rem;
+  z-index: 9999;
+  opacity: 0;
+  transform: translateY(-10px);
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: none;
+  max-width: 360px;
+  word-wrap: break-word;
+}
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.toast-success { background: var(--success); }
+.toast-error { background: var(--danger); }
+.toast-info { background: var(--primary); }
+.toast-warn { background: var(--warn); color: #000; }
+
+/* ── Loading Spinner ──────────────────────────────────────── */
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+button.loading { opacity: 0.7; pointer-events: none; }
