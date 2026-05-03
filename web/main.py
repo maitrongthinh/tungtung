@@ -613,7 +613,11 @@ async def api_manual_post(payload: dict, request: Request) -> JSONResponse:
     image_path_local: str = ""
 
     try:
-        from playwright.async_api import async_playwright
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            logger.warning("Playwright not installed - manual post will use basic info only")
+            raise Exception("Playwright not available")
         import re as _re
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(

@@ -4,7 +4,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import chromadb
+try:
+    import chromadb
+    _HAS_CHROMADB = True
+except ImportError:
+    _HAS_CHROMADB = False
 
 from common.config import load_settings
 from common.database import Database
@@ -21,8 +25,12 @@ class ContextCompactor:
         self.database = database
         self.snapshot_dir = Path(self.settings.memory_dir / "snapshots")
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
-        self.client = chromadb.PersistentClient(path=str(self.settings.memory_dir / "chroma_db"))
-        self.collection = self.client.get_or_create_collection(self.settings.memory.collection_name)
+        if _HAS_CHROMADB:
+            self.client = chromadb.PersistentClient(path=str(self.settings.memory_dir / "chroma_db"))
+            self.collection = self.client.get_or_create_collection(self.settings.memory.collection_name)
+        else:
+            self.client = None
+            self.collection = None
 
     def compact_day(self, on_day: datetime | None = None) -> Path:
         day = (on_day or datetime.now(UTC)).astimezone(UTC)
@@ -42,6 +50,8 @@ class ContextCompactor:
         return path
 
     def query_insights(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+        if not self.collection:
+            return []
         try:
             results = self.collection.query(query_texts=[query], n_results=limit)
         except Exception:
@@ -62,6 +72,8 @@ class ContextCompactor:
         }
 
     def _persist_insights(self, snapshot: dict[str, Any]) -> None:
+        if not self.collection:
+            return
         date_key = snapshot["date"]
         for index, post in enumerate(snapshot.get("top_posts", [])):
             content = post["content"]["body"]

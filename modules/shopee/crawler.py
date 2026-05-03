@@ -11,7 +11,14 @@ from urllib.parse import quote
 
 import httpx
 from PIL import Image
-from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+try:
+    from playwright.async_api import Browser, BrowserContext, Page, async_playwright
+    _HAS_PLAYWRIGHT = True
+except ImportError:
+    _HAS_PLAYWRIGHT = False
+    Browser = None  # type: ignore
+    BrowserContext = None  # type: ignore
+    Page = None  # type: ignore
 
 from common.config import load_settings
 from common.logging import get_logger
@@ -117,8 +124,12 @@ class ShopeeCrawler:
         # Tăng limit mỗi lần cào để lấy được nhiều hơn
         effective_limit = max(limit_per_category, 30)
 
-        browser = await _get_shared_browser()
+        if not _HAS_PLAYWRIGHT:
+            logger.warning("Playwright not installed - using API-only crawl mode")
+        browser = await _get_shared_browser() if _HAS_PLAYWRIGHT else None
         for category in categories:
+            if not browser:
+                break
             sort_options = random.sample(SORT_BY_OPTIONS, min(3, len(SORT_BY_OPTIONS)))
             for sort_by in sort_options:
                 if len(deduped) >= self.settings.shopee.max_products_per_cycle:
@@ -242,7 +253,9 @@ class ShopeeCrawler:
             self.proxy_pool.release(session_key)
 
     async def crawl_category(self, category: str, limit: int = 20) -> list[ProductRecord]:
-        browser = await _get_shared_browser()
+        if not _HAS_PLAYWRIGHT:
+            logger.warning("Playwright not installed - using API-only crawl mode")
+        browser = await _get_shared_browser() if _HAS_PLAYWRIGHT else None
         return await self._crawl_category_with_browser(browser, category, limit=limit)
 
     async def _paced_navigation(self, page: Page, url: str) -> None:

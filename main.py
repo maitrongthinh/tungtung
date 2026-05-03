@@ -35,7 +35,7 @@ def _check_python():
 
 def _install_deps():
     """Auto install dependencies if missing."""
-    required = ["fastapi", "uvicorn", "playwright", "sse_starlette", "chromadb", "openai", "httpx", "pydantic"]
+    required = ["fastapi", "uvicorn", "sse_starlette", "openai", "httpx", "pydantic"]
     missing = [name for name in required if importlib.util.find_spec(name) is None]
     if not missing:
         return
@@ -48,26 +48,18 @@ def _install_deps():
 
 
 def _install_playwright():
-    """Auto install Playwright chromium browser."""
+    """Auto install Playwright chromium browser if available."""
     try:
-        from playwright.async_api import async_playwright
-        # Quick check if chromium is installed
-        import asyncio
-        async def _check():
-            async with async_playwright() as p:
-                try:
-                    b = await p.chromium.launch(headless=True, args=["--no-sandbox"])
-                    await b.close()
-                    return True
-                except Exception:
-                    return False
-        if asyncio.run(_check()):
-            return
+        import playwright  # noqa: F401
+    except ImportError:
+        print("[info] Playwright not installed - crawler will use API-only mode")
+        print("       To enable browser crawling: pip install playwright && playwright install chromium")
+        return
+    try:
+        subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except Exception:
-        pass
-    print("[setup] Installing Playwright Chromium browser (first time only)...")
-    subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"], 
-                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print("[info] Playwright browser install skipped (run manually if needed)")
 
 
 def _ensure_env():

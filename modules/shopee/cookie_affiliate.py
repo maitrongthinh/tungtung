@@ -65,7 +65,11 @@ class CookieAffiliateClient:
         *,
         expect_valid: bool = True,
     ) -> dict[str, str]:
-        from playwright.async_api import async_playwright
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError:
+            logger.warning("Playwright not installed - cookie affiliate not available")
+            return {}
 
         cookies = self._parse_cookies()
         results: dict[str, str] = {}
