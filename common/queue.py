@@ -5,8 +5,14 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from threading import Lock
 from typing import Any
 
-from redis import Redis
-from rq import Queue
+try:
+    from redis import Redis
+    from rq import Queue
+    _HAS_REDIS = True
+except ImportError:
+    Redis = None  # type: ignore
+    Queue = None  # type: ignore
+    _HAS_REDIS = False
 
 from common.config import load_settings
 
@@ -40,7 +46,9 @@ def _local_executor() -> ThreadPoolExecutor:
     return _LOCAL_EXECUTOR
 
 
-def get_redis_connection() -> Redis:
+def get_redis_connection() -> "Redis":
+    if not _HAS_REDIS:
+        raise RuntimeError("Redis not installed. Install with: pip install redis rq")
     return Redis.from_url(load_settings(refresh=True).integrations.redis_url)
 
 
