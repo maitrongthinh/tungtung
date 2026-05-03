@@ -1,7 +1,5 @@
-# === Shopee Affiliate Agent ===
-# Optimized for Pterodactyl (limited disk space)
-
-# Core
+# === Shopee Affiliate Agent - Pterodactyl Optimized ===
+# Total install: ~50MB (fits in 500MB disk)
 openai>=1.12.0
 apscheduler>=3.10.4
 fastapi>=0.115.0
@@ -15,9 +13,3 @@ pyyaml>=6.0.2
 sse-starlette>=2.1.3
 tenacity>=9.0.0
 uvicorn[standard]>=0.34.0
-
-# Crawler (REQUIRED - Shopee API + browser fallback)
-playwright>=1.40.0
-
-# Memory: NO chromadb (too heavy ~500MB with deps)
-# Uses JSON-based memory instead (already built into code)

@@ -34,40 +34,52 @@ def _check_python():
 
 
 def _install_deps():
-    """Auto install dependencies if missing."""
+    """Auto install dependencies if missing. Non-fatal on Pterodactyl."""
     required = ["fastapi", "uvicorn", "sse_starlette", "openai", "httpx", "pydantic"]
     missing = [name for name in required if importlib.util.find_spec(name) is None]
     if not missing:
         return
     print(f"[setup] Installing {len(missing)} missing packages...")
     req_file = PROJECT_ROOT / "requirements.txt"
-    if req_file.exists():
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(req_file), "-q"])
-    else:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *missing])
+    try:
+        if req_file.exists():
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", str(req_file), "-q"])
+        else:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", *missing])
+    except subprocess.CalledProcessError as e:
+        print(f"[warn] pip install failed (disk space?): {e}")
+        print("[warn] Trying individual packages...")
+        for pkg in missing:
+            try:
+                subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", pkg])
+            except subprocess.CalledProcessError:
+                print(f"[warn] Failed to install {pkg} - some features may not work")
 
 
 def _install_playwright():
-    """Auto install Playwright chromium browser."""
+    """Auto install Playwright chromium browser if available."""
     try:
         import playwright  # noqa: F401
     except ImportError:
-        print("[info] Playwright not installed - crawler will use API-only mode")
+        print("[info] Playwright not installed - crawler will use Shopee API mode")
+        return
+    # On Pterodactyl, skip chromium install to save disk
+    if os.path.exists("/home/container"):
+        print("[info] Pterodactyl detected - skipping Chromium install (use API mode)")
         return
     # Check if chromium is already available
     try:
         import asyncio
         async def _check():
             async with playwright.async_api.async_playwright() as p:
-                b = await p.chromium.launch(headless=True, args=["--no-sandbox", "--no-sandbox"])
+                b = await p.chromium.launch(headless=True, args=["--no-sandbox"])
                 await b.close()
                 return True
         if asyncio.run(_check()):
-            return  # Already installed
+            return
     except Exception:
         pass
-    # Install chromium
-    print("[setup] Installing Playwright Chromium (first time only, ~200MB)...")
+    print("[setup] Installing Playwright Chromium (first time only)...")
     try:
         subprocess.check_call(
             [sys.executable, "-m", "playwright", "install", "chromium"],
@@ -75,8 +87,7 @@ def _install_playwright():
         )
         print("[setup] Playwright Chromium installed")
     except Exception as e:
-        print(f"[warn] Playwright install failed: {e}")
-        print("        Run manually: python -m playwright install chromium")
+        print(f"[warn] Playwright install skipped: {e}")
 
 
 def _ensure_env():
@@ -268,12 +279,18 @@ _ensure_default_account()
 _ensure_runtime_config()
 
 # Now import the actual application
-from common.config import load_settings
-from common.logging import get_logger, configure_logging
-from core.bootstrap import build_runtime
-from core.loop_controller import DailyLoopController
-from core.scheduler import AgentScheduler
-from web.main import app
+# Import with error handling
+try:
+    from common.config import load_settings
+    from common.logging import get_logger, configure_logging
+    from core.bootstrap import build_runtime
+    from core.loop_controller import DailyLoopController
+    from core.scheduler import AgentScheduler
+    from web.main import app
+except ImportError as e:
+    print(f"[ERROR] Missing critical dependency: {e}")
+    print("        Run: pip install -r requirements.txt")
+    sys.exit(1)
 
 import uvicorn
 
