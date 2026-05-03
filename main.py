@@ -48,18 +48,35 @@ def _install_deps():
 
 
 def _install_playwright():
-    """Auto install Playwright chromium browser if available."""
+    """Auto install Playwright chromium browser."""
     try:
         import playwright  # noqa: F401
     except ImportError:
         print("[info] Playwright not installed - crawler will use API-only mode")
-        print("       To enable browser crawling: pip install playwright && playwright install chromium")
         return
+    # Check if chromium is already available
     try:
-        subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        import asyncio
+        async def _check():
+            async with playwright.async_api.async_playwright() as p:
+                b = await p.chromium.launch(headless=True, args=["--no-sandbox", "--no-sandbox"])
+                await b.close()
+                return True
+        if asyncio.run(_check()):
+            return  # Already installed
     except Exception:
-        print("[info] Playwright browser install skipped (run manually if needed)")
+        pass
+    # Install chromium
+    print("[setup] Installing Playwright Chromium (first time only, ~200MB)...")
+    try:
+        subprocess.check_call(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        print("[setup] Playwright Chromium installed")
+    except Exception as e:
+        print(f"[warn] Playwright install failed: {e}")
+        print("        Run manually: python -m playwright install chromium")
 
 
 def _ensure_env():
@@ -185,7 +202,7 @@ def _print_status():
     from dotenv import load_dotenv
     load_dotenv(PROJECT_ROOT / ".env")
     
-    has_ai = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("AI_API_KEY"))
+    has_ai = bool(os.getenv("ANTHROPIC_API_KEY") or os.getenv("AI_API_KEY") or os.getenv("OPENAI_API_KEY"))
     has_shopee = bool(os.getenv("SHOPEE_AFFILIATE_TOKEN"))
     has_meta_app = bool(os.getenv("META_APP_ID"))
     
@@ -202,10 +219,25 @@ def _print_status():
         except Exception:
             pass
 
+    # Check playwright
+    has_pw = False
+    try:
+        import asyncio
+        async def _check_pw():
+            from playwright.async_api import async_playwright
+            async with async_playwright() as p:
+                b = await p.chromium.launch(headless=True, args=["--no-sandbox"])
+                await b.close()
+                return True
+        has_pw = asyncio.run(_check_pw())
+    except Exception:
+        pass
+
     print("=" * 60)
     print("  SYSTEM STATUS")
     print("=" * 60)
     print(f"  AI API Key:      {'OK' if has_ai else 'MISSING - set ANTHROPIC_API_KEY in .env'}")
+    print(f"  Playwright:      {'OK - browser crawl enabled' if has_pw else 'MISSING - API-only mode (limited)'}")
     print(f"  Shopee Token:    {'OK' if has_shopee else 'MISSING - set SHOPEE_AFFILIATE_TOKEN in .env'}")
     print(f"  Facebook App:    {'OK' if has_meta_app else 'MISSING - set META_APP_ID in .env'}")
     print(f"  Accounts:        {acc_count} configured, {acc_with_token} with token")
