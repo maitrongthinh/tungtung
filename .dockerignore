@@ -1,0 +1,12 @@
+﻿__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+*.pyo
+*.pyd
+.git/
+logs/
+data/
+farm/assets/
+memory/chroma_db/
+memory/snapshots/
