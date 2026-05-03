@@ -409,6 +409,20 @@ class AgentOrchestrator:
         return state
 
     async def update_memory(self, state: CycleState) -> CycleState:
+        # Record daily revenue metrics
+        try:
+            from modules.revenue.tracker import RevenueTracker
+            tracker = RevenueTracker(self.database)
+            kpi = self.database.get_daily_kpi(datetime.now(UTC))
+            today = datetime.now(UTC).date().isoformat()
+            tracker.record_daily_metrics(today, {
+                "clicks": kpi.get("clicks", 0),
+                "posts": kpi.get("posts_published", 0),
+                "likes": kpi.get("likes", 0),
+                "comments": kpi.get("comments", 0),
+            })
+        except Exception as exc:
+            logger.debug("Revenue tracking skipped: %s", exc)
         posts = state.published_posts or self.database.list_recent_published_posts(hours=24, limit=100) or state.scheduled_posts
         category_counter = Counter(post.product.category for post in posts)
         top_categories = [(category, float(count)) for category, count in category_counter.most_common(5)]

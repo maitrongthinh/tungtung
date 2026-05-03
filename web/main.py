@@ -882,42 +882,45 @@ async def ai_key_stats() -> JSONResponse:
 
 @app.get("/api/revenue")
 async def api_revenue() -> JSONResponse:
-    """Revenue metrics: commission, orders, top earners."""
-    now = datetime.now(UTC)
-    # Get commission tracking events from activity log
-    commission_events = database.get_activity_log(limit=100, event_type="commission_tracking")
-    total_commission = 0.0
-    total_orders = 0
-    for event in commission_events:
-        detail = event.get("detail", {})
-        total_commission += detail.get("commission", 0.0)
-        total_orders += detail.get("orders", 0)
-    # Get published posts with click data for revenue estimation
-    published = database.list_recent_published_posts(hours=72, limit=100)
-    top_earners = []
-    for post in sorted(published, key=lambda p: p.performance.clicks, reverse=True)[:10]:
-        top_earners.append({
-            "post_id": post.post_id,
-            "product_name": post.product.name[:60],
-            "category": post.product.category,
-            "commission_rate": post.product.commission_rate,
-            "clicks": post.performance.clicks,
-            "likes": post.performance.likes,
-            "comments": post.performance.comments,
-            "published_at": post.published_at.isoformat() if post.published_at else None,
-        })
-    kpi = database.get_daily_kpi(now)
-    # Estimate revenue: clicks * avg conversion (2%) * avg commission
-    est_click_value = total_commission / max(total_orders, 1) if total_orders > 0 else 5000
-    estimated_revenue = kpi.get("clicks", 0) * 0.02 * est_click_value
+    """Comprehensive revenue metrics with ROI analysis."""
+    from modules.revenue.tracker import RevenueTracker
+    tracker = RevenueTracker(database)
+    roi = tracker.get_roi_summary()
+    content_perf = tracker.get_content_performance()
+    roi["content_performance"] = content_perf
+    roi["revenue_history"] = tracker.load_data().get("daily", {})
+    return JSONResponse(roi)
+
+
+@app.get("/api/revenue/categories")
+async def api_revenue_categories() -> JSONResponse:
+    """Top performing categories by clicks and commission."""
+    from modules.revenue.tracker import RevenueTracker
+    tracker = RevenueTracker(database)
+    return JSONResponse({"categories": tracker.get_top_categories(days=30)})
+
+
+@app.get("/api/revenue/hours")
+async def api_revenue_hours() -> JSONResponse:
+    """Best posting hours based on historical data."""
+    from modules.revenue.window_optimizer import WindowOptimizer
+    optimizer = WindowOptimizer(database)
     return JSONResponse({
-        "tracked_commission": total_commission,
-        "tracked_orders": total_orders,
-        "estimated_daily_revenue": round(estimated_revenue),
-        "today_clicks": kpi.get("clicks", 0),
-        "today_posts": kpi.get("posts_published", 0),
-        "top_earners": top_earners,
-        "avg_commission_per_order": round(total_commission / max(total_orders, 1)),
+        "suggested_windows": optimizer.suggest_windows(),
+        "slow_hours": optimizer.get_slow_hours(),
+        "hourly_engagement": optimizer.analyze_engagement_by_hour(),
+    })
+
+
+@app.get("/api/hashtags")
+async def api_hashtags(category: str = "shopee") -> JSONResponse:
+    """Get optimized hashtags for a category."""
+    from modules.revenue.hashtag_optimizer import HashtagOptimizer
+    optimizer = HashtagOptimizer(database)
+    return JSONResponse({
+        "category": category,
+        "suggested": optimizer.suggest_hashtags(category),
+        "trending": optimizer.get_trending_hashtags(),
     })
 
 

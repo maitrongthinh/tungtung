@@ -40,6 +40,12 @@ class ContentWriter:
             "tone": account.tone,
             "memory_insights": memory_insights or [],
         }
+        # A/B style variation: rotate between hooks
+        import time as _time
+        style_seed = int(_time.time()) % 4
+        style_labels = ["story", "question", "stats", "urgency"]
+        prompt_context["_style"] = style_labels[style_seed]
+
         cache_lookup_key = cache_key("writer", prompt_context)
         if self.database:
             cached = self.database.get_ai_cache(cache_lookup_key)
@@ -89,7 +95,7 @@ class ContentWriter:
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 max_tokens=settings.ai.writer_max_tokens,
-                temperature=round(random.uniform(0.35, 0.55), 2),
+                temperature=round(random.uniform(0.30, 0.65), 2),  # Wider range for A/B variation
             )
             if self.database:
                 usage = getattr(self.client, "last_usage", None) or {}

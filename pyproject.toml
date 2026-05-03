@@ -39,7 +39,7 @@ dev = [
 ]
 
 [tool.setuptools]
-packages = ["common", "core", "modules", "modules.shopee", "modules.ai", "modules.meta", "modules.memory", "web"]
+packages = ["common", "core", "modules", "modules.shopee", "modules.ai", "modules.meta", "modules.memory", "modules.revenue", "web"]
 include-package-data = true
 
 [tool.setuptools.package-data]
