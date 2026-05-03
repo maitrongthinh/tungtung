@@ -180,6 +180,13 @@ class AgentOrchestrator:
                 memory_insights=memory_insights,
                 use_ai=self.settings.ai.enabled and len(drafted) < self.settings.ai.write_top_posts_per_cycle,
             )
+            # Boost CTA with engagement triggers
+            try:
+                from modules.revenue.engagement_booster import EngagementBooster
+                booster = EngagementBooster(self.database)
+                # Will boost CTA after post is created
+            except Exception:
+                pass
             post_id = str(uuid4())
             post = PostRecord(
                 post_id=post_id,
@@ -198,6 +205,13 @@ class AgentOrchestrator:
             tracked_link = build_tracking_link(post.post_id, product.affiliate_link)
             post.content.affiliate_link = tracked_link
             post.content.cta = self._rewrite_cta(post.content.cta, product.affiliate_link, tracked_link)
+            # Boost CTA with engagement triggers before saving
+            try:
+                from modules.revenue.engagement_booster import EngagementBooster
+                booster = EngagementBooster(self.database)
+                post.content.cta = booster.boost_cta(post)
+            except Exception:
+                pass
             drafted.append(post)
             self.database.upsert_post(post)
             self.farm_manager.save_draft(post)
@@ -333,6 +347,12 @@ class AgentOrchestrator:
                 self.database.upsert_post(post)
                 self.farm_manager.save_published(post)
                 published.append(post)
+                # Record impression in conversion funnel
+                try:
+                    from modules.revenue.conversion_funnel import ConversionFunnel
+                    ConversionFunnel(self.database).record_impression(post.post_id)
+                except Exception:
+                    pass
                 self.database.log_activity(
                     "published",
                     f"Đăng thành công: {post.product.name[:50]}",

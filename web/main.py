@@ -1020,9 +1020,163 @@ async def redirect_post_click(post_id: str) -> RedirectResponse:
     if not post:
         raise HTTPException(status_code=404, detail="Tracking link not found")
     database.increment_post_clicks(post_id)
+    # Record in conversion funnel
+    try:
+        from modules.revenue.conversion_funnel import ConversionFunnel
+        ConversionFunnel(database).record_click(post_id)
+    except Exception:
+        pass
     destination = post.product.affiliate_link or post.content.affiliate_link
     return RedirectResponse(destination, status_code=307)
 
+
+@app.get("/api/funnel")
+async def api_funnel() -> JSONResponse:
+    """Conversion funnel: impressions -> clicks -> purchases."""
+    from modules.revenue.conversion_funnel import ConversionFunnel
+    funnel = ConversionFunnel(database)
+    return JSONResponse(funnel.get_funnel_metrics())
+
+
+@app.get("/api/funnel/best")
+async def api_funnel_best() -> JSONResponse:
+    """Best converting posts for learning."""
+    from modules.revenue.conversion_funnel import ConversionFunnel
+    funnel = ConversionFunnel(database)
+    return JSONResponse({"posts": funnel.get_best_converting_posts()})
+
+
+@app.get("/api/scaling")
+async def api_scaling() -> JSONResponse:
+    """Auto-scaling recommendations based on performance."""
+    from modules.revenue.auto_scaler import KPIAutoScaler
+    scaler = KPIAutoScaler(database)
+    return JSONResponse(scaler.get_optimal_settings())
+
+
+@app.post("/api/flash-sale/detect")
+async def api_flash_sale_detect(payload: dict) -> JSONResponse:
+    """Detect flash sales from product list."""
+    from modules.revenue.flash_sale import FlashSaleDetector
+    detector = FlashSaleDetector(database)
+    # Parse products from payload
+    products = []
+    from common.models import ProductRecord
+    for item in payload.get("products", []):
+        try:
+            products.append(ProductRecord.model_validate(item))
+        except Exception:
+            continue
+    if not products:
+        return JSONResponse({"alerts": [], "message": "No valid products provided"})
+    alerts = await detector.detect_price_drops(products)
+    return JSONResponse({
+        "alerts": [{
+            "product_name": a["product"].name[:60],
+            "discount": a["discount"],
+            "urgency": a["urgency"],
+            "reason": a["reason"],
+        } for a in alerts],
+        "count": len(alerts),
+    })
+
+
+@app.get("/api/engagement/analyze")
+async def api_engagement_analyze() -> JSONResponse:
+    """Analyze engagement patterns and suggest improvements."""
+    from modules.revenue.engagement_booster import EngagementBooster
+    booster = EngagementBooster(database)
+    # Get recent published posts and analyze
+    recent = database.list_recent_published_posts(hours=72, limit=50)
+    analysis = {
+        "total_posts": len(recent),
+        "avg_clicks": round(sum(p.performance.clicks for p in recent) / max(len(recent), 1), 1),
+        "avg_likes": round(sum(p.performance.likes for p in recent) / max(len(recent), 1), 1),
+        "avg_comments": round(sum(p.performance.comments for p in recent) / max(len(recent), 1), 1),
+        "high_engagement_posts": [
+            {"title": p.content.title[:50], "clicks": p.performance.clicks, "likes": p.performance.likes}
+            for p in sorted(recent, key=lambda x: x.performance.likes + x.performance.comments, reverse=True)[:5]
+        ],
+        "zero_engagement": sum(1 for p in recent if p.performance.clicks == 0 and p.performance.likes == 0),
+    }
+    return JSONResponse(analysis)
+
+
+@app.get("/api/optimize/suggestions")
+async def api_optimize_suggestions() -> JSONResponse:
+    """Get actionable optimization suggestions based on all data."""
+    from modules.revenue.auto_scaler import KPIAutoScaler
+    from modules.revenue.tracker import RevenueTracker
+    from modules.revenue.conversion_funnel import ConversionFunnel
+
+    scaler = KPIAutoScaler(database)
+    tracker = RevenueTracker(database)
+    funnel_tracker = ConversionFunnel(database)
+
+    scaling = scaler.should_scale_up()
+    top_cats = tracker.get_top_categories(days=7)
+    best_posts = funnel_tracker.get_best_converting_posts(limit=5)
+    content_perf = tracker.get_content_performance(days=7)
+
+    suggestions = []
+
+    # Scaling suggestion
+    if scaling.get("scale"):
+        suggestions.append({
+            "type": "scaling",
+            "priority": "HIGH",
+            "action": f"Scale {scaling['direction']} to {scaling['suggested']} posts/day",
+            "reason": scaling["reason"],
+        })
+
+    # Category suggestions
+    if top_cats:
+        best_cat = top_cats[0]
+        if best_cat.get("clicks_per_post", 0) > 2:
+            suggestions.append({
+                "type": "category",
+                "priority": "HIGH",
+                "action": f"Focus more on '{best_cat['category']}' - {best_cat['clicks_per_post']} clicks/post",
+                "reason": "Best performing category",
+            })
+
+    # Content suggestions
+    if content_perf.get("zero_click_posts", 0) > content_perf.get("total_posts", 1) * 0.3:
+        suggestions.append({
+            "type": "content",
+            "priority": "HIGH",
+            "action": "Improve content quality - too many zero-click posts",
+            "reason": f"{content_perf['zero_click_posts']}/{content_perf['total_posts']} posts have 0 clicks",
+        })
+
+    # CTR suggestion
+    if content_perf.get("click_through_rate", 0) < 1.0:
+        suggestions.append({
+            "type": "engagement",
+            "priority": "MEDIUM",
+            "action": "Add more engagement triggers (questions, polls, urgency)",
+            "reason": f"CTR is {content_perf.get('click_through_rate', 0)}% - below 1% target",
+        })
+
+    # Best hook patterns
+    if best_posts:
+        suggestions.append({
+            "type": "content_pattern",
+            "priority": "MEDIUM",
+            "action": f"Best converting hook: '{best_posts[0]['hook'][:50]}'",
+            "reason": f"Score: {best_posts[0]['conversion_score']} - study this pattern",
+        })
+
+    return JSONResponse({
+        "suggestions": suggestions,
+        "scaling": scaling,
+        "top_categories": top_cats[:5],
+        "content_performance": content_perf,
+    })
+
+
+def main() -> None:
+    import uvicorn
 
 def main() -> None:
     import uvicorn
