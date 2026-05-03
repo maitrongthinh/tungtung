@@ -19,6 +19,18 @@
   </nav>
 
   <main class="page">
+    <section class="panel" style="border-left: 3px solid var(--primary);">
+      <h2>📋 Config Guide</h2>
+      <div class="muted" style="line-height:1.8;">
+        <p><strong>integrations.web_secret_key</strong>: Mat khau dang nhap dashboard. Dung <code>python -c "import secrets; print(secrets.token_urlsafe(32))"</code> de tao.</p>
+        <p><strong>integrations.ai_api_key</strong>: API key cho AI (OpenAI/Gemini/custom). Hoac config <code>ai_providers</code> de dung nhieu key.</p>
+        <p><strong>integrations.shopee_affiliate_cookie</strong>: Cookie Shopee de tao affiliate link. Copy tu browser sau khi dang nhap Shopee Affiliate.</p>
+        <p><strong>meta_app_id + meta_app_secret</strong>: Facebook App credentials de refresh token tu dong.</p>
+        <p><strong>ai.max_daily_requests</strong>: Gioi han so luong API call AI moi ngay. Mac dinh 200.</p>
+        <p><strong>kpi.posts_per_day</strong>: So bai dang muc tieu moi ngay. Mac dinh 20.</p>
+        <p><strong>Luu y</strong>: <code>storage</code> section khong hien thi tren web de tranh thay doi duong dan DB khi he thong dang chay.</p>
+      </div>
+    </section>
     <div class="row between wrap" style="margin-bottom:20px;">
       <div>
         <h1 class="page-title">Cấu hình hệ thống</h1>

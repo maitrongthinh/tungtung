@@ -101,10 +101,25 @@ class AccountConfig(BaseModel):
     def resolved_access_token(self) -> str | None:
         import os
 
-        if self.access_token.strip():
-            return self.access_token.strip()
+        token = self.access_token.strip() if self.access_token else ""
+        # Decrypt if encrypted
+        if token.startswith("enc:"):
+            try:
+                from common.crypto import decrypt_token
+                token = decrypt_token(token)
+            except Exception:
+                pass
+        if token:
+            return token
         if self.access_token_env:
-            return os.getenv(self.access_token_env)
+            env_token = os.getenv(self.access_token_env, "")
+            if env_token.startswith("enc:"):
+                try:
+                    from common.crypto import decrypt_token
+                    env_token = decrypt_token(env_token)
+                except Exception:
+                    pass
+            return env_token or None
         return None
 
 
