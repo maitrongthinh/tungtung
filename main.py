@@ -57,37 +57,40 @@ def _install_deps():
 
 
 def _install_playwright():
-    """Auto install Playwright chromium browser if available."""
+    """Auto install Playwright chromium browser."""
     try:
         import playwright  # noqa: F401
     except ImportError:
-        print("[info] Playwright not installed - crawler will use Shopee API mode")
-        return
-    # On Pterodactyl, skip chromium install to save disk
-    if os.path.exists("/home/container"):
-        print("[info] Pterodactyl detected - skipping Chromium install (use API mode)")
-        return
+        print("[info] Playwright not installed - installing...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", "playwright", "-q"])
+        except Exception:
+            print("[warn] Could not install Playwright - crawler will use API mode")
+            return
     # Check if chromium is already available
     try:
         import asyncio
+        from playwright.async_api import async_playwright as _ap
         async def _check():
-            async with playwright.async_api.async_playwright() as p:
+            async with _ap() as p:
                 b = await p.chromium.launch(headless=True, args=["--no-sandbox"])
                 await b.close()
                 return True
         if asyncio.run(_check()):
+            print("[setup] Playwright Chromium: OK")
             return
     except Exception:
         pass
-    print("[setup] Installing Playwright Chromium (first time only)...")
+    # Install chromium
+    print("[setup] Installing Playwright Chromium (first time only, ~200MB)...")
     try:
         subprocess.check_call(
             [sys.executable, "-m", "playwright", "install", "chromium"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-        print("[setup] Playwright Chromium installed")
+        print("[setup] Playwright Chromium installed successfully")
     except Exception as e:
-        print(f"[warn] Playwright install skipped: {e}")
+        print(f"[warn] Chromium install failed: {e}")
+        print("        Run manually: python -m playwright install chromium")
 
 
 def _ensure_env():

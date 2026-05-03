@@ -27,11 +27,18 @@ class ContextCompactor:
         self.snapshot_dir = Path(self.settings.memory_dir / "snapshots")
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
         if _HAS_CHROMADB:
-            self.client = chromadb.PersistentClient(path=str(self.settings.memory_dir / "chroma_db"))
-            self.collection = self.client.get_or_create_collection(self.settings.memory.collection_name)
+            try:
+                self.client = chromadb.PersistentClient(path=str(self.settings.memory_dir / "chroma_db"))
+                self.collection = self.client.get_or_create_collection(self.settings.memory.collection_name)
+                logger.info("ChromaDB initialized for long-term memory")
+            except Exception as exc:
+                logger.warning("ChromaDB init failed (%s), using JSON fallback", exc)
+                self.client = None
+                self.collection = None
         else:
             self.client = None
             self.collection = None
+            logger.info("ChromaDB not installed, using JSON-based memory search")
 
     def compact_day(self, on_day: datetime | None = None) -> Path:
         day = (on_day or datetime.now(UTC)).astimezone(UTC)
@@ -51,9 +58,18 @@ class ContextCompactor:
         return path
 
     def query_insights(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
-        """Search insights using keyword matching (lightweight TF-IDF-like)."""
+        """Search insights - ChromaDB vector search when available, JSON keyword fallback."""
+        # Try ChromaDB first (vector similarity - best quality)
+        if self.collection:
+            try:
+                results = self.collection.query(query_texts=[query], n_results=limit)
+                documents = results.get("documents", [[]])[0]
+                metadatas = results.get("metadatas", [[]])[0]
+                return [{"document": doc, "metadata": meta} for doc, meta in zip(documents, metadatas, strict=False)]
+            except Exception:
+                pass
+        # Fallback: JSON keyword search (still effective)
         try:
-            # Load all snapshots
             results: list[dict[str, Any]] = []
             query_words = set(query.lower().split())
             for path in sorted(self.snapshot_dir.glob("*.json"), reverse=True)[:30]:
@@ -67,18 +83,12 @@ class ContextCompactor:
                             "category": post.get("product", {}).get("category", ""),
                             "clicks": post.get("performance", {}).get("clicks", 0),
                         }
-                        # Simple keyword relevance score
                         content_lower = content.lower()
                         score = sum(1 for word in query_words if word in content_lower)
                         if score > 0 or not query_words:
-                            results.append({
-                                "document": content[:500],
-                                "metadata": metadata,
-                                "relevance": score,
-                            })
+                            results.append({"document": content[:500], "metadata": metadata, "relevance": score})
                 except Exception:
                     continue
-            # Sort by relevance then by clicks
             results.sort(key=lambda x: (x.get("relevance", 0), x.get("metadata", {}).get("clicks", 0)), reverse=True)
             return results[:limit]
         except Exception:
@@ -97,7 +107,7 @@ class ContextCompactor:
 
     def _persist_insights(self, snapshot: dict[str, Any]) -> None:
         if not self.collection:
-            return
+            return  # ChromaDB not available, snapshots still saved as JSON files
         date_key = snapshot["date"]
         for index, post in enumerate(snapshot.get("top_posts", [])):
             content = post["content"]["body"]
