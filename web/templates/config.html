@@ -255,6 +255,10 @@
           <div class="form-group" style="margin-top:8px;">
             <label>Facebook Cookies (JSON array từ EditThisCookie hoặc semicolon-separated)</label>
             <textarea id="accFbCookies" class="editor" style="min-height:120px;font-size:0.8rem;" placeholder='[{"name":"c_user","value":"123456",...},{"name":"xs","value":"abc",...}]'></textarea>
+            <div class="row" style="gap:8px;margin-top:8px;">
+              <button id="validateFbCookieBtn" class="btn-outline" type="button">🔍 Kiểm tra Cookie Facebook</button>
+              <span id="fbCookieStatus" class="muted" style="font-size:0.85rem;"></span>
+            </div>
             <p class="muted" style="font-size:0.78rem;margin-top:4px;">💡 Mở Facebook → F12 → Application → Cookies → chọn .facebook.com → Export bằng extension EditThisCookie/Cookie Editor</p>
           </div>
         </div>
@@ -823,6 +827,27 @@
 
     document.getElementById("accAuthMode").addEventListener("change", function() {
       toggleAuthModeFields(this.value);
+    });
+
+    // ─── Validate FB Cookie Button ───
+    document.getElementById("validateFbCookieBtn").addEventListener("click", async function() {
+      var cookies = document.getElementById("accFbCookies").value.trim();
+      var el = document.getElementById("fbCookieStatus");
+      if (!cookies) { el.textContent = "❌ Chưa nhập cookie"; return; }
+      el.textContent = "Đang kiểm tra...";
+      try {
+        var res = await fetch("/api/meta/validate-cookies", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({cookies: cookies})
+        });
+        var data = await res.json();
+        if (data.valid) {
+          el.innerHTML = '✅ Cookie hợp lệ! User ID: <strong>' + (data.user_id||'?') + '</strong> (' + data.cookie_count + ' cookies)';
+        } else {
+          el.textContent = '❌ ' + (data.reason || 'Cookie không hợp lệ');
+        }
+      } catch(e) { el.textContent = '❌ Lỗi: ' + e.message; }
     });
 
     // ─── Init ───

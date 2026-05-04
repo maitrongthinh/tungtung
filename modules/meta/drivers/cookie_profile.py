@@ -23,7 +23,9 @@ Key differences from CookiePageDriver:
 """
 from __future__ import annotations
 
+import hashlib
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -111,7 +113,7 @@ class CookieProfileDriver(MetaDriver):
                 return post_id
 
             logger.warning("Profile post submitted but could not extract post_id")
-            return f"cookie_profile_{hash(message) % 10**10}"
+            return _synthetic_id("cookie_profile", message)
 
     # ── Photo post ──────────────────────────────────────────────
 
@@ -153,7 +155,7 @@ class CookieProfileDriver(MetaDriver):
                 return post_id
 
             logger.warning("Profile photo post submitted but could not extract post_id")
-            return f"cookie_profile_photo_{hash(message) % 10**10}"
+            return _synthetic_id("cookie_profile_photo", message)
 
     # ── Verification ────────────────────────────────────────────
 

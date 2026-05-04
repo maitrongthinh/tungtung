@@ -297,7 +297,18 @@
       document.getElementById("kpiLabel").textContent = (kpi.posts_published || 0) + "/" + (status.target_posts || 0);
       const proxy = status.proxy_health || {};
       document.getElementById("proxyHealth").textContent = (proxy.alive || 0) + "/" + (proxy.total || 0) + " alive";
-      document.getElementById("accountHealth").textContent = Object.entries(status.account_health || {}).map(function(e){return e[0]+":"+e[1]}).join(" | ") || "no data";
+      (function(){
+        var ah = status.account_health || {};
+        var accs = window._accountsCache || [];
+        var icons = {"api":"📘","cookie_page":"🍪","cookie_profile":"👤"};
+        document.getElementById("accountHealth").innerHTML = Object.entries(ah).map(function(e){
+          var acc = accs.find(function(a){return a.id===e[0]});
+          var mode = acc ? (acc.auth_mode||"api") : "api";
+          var icon = icons[mode] || "📘";
+          var color = e[1]==="ok" ? "var(--success,#4caf50)" : "var(--danger,#f44336)";
+          return '<span style="color:'+color+';" title="'+mode+'">'+icon+' '+e[0]+':'+e[1]+'</span>';
+        }).join(" | ") || "no data";
+      })();
       document.getElementById("queueHealth").textContent = Object.entries(status.queue_stats || {}).map(function(e){return e[0]+":"+e[1]}).join(" | ") || "0";
       renderAiUsage(status.ai_usage || initialAiUsage);
       renderCountdown(status.next_window_at);
@@ -469,6 +480,9 @@
     }
 
     // ─── Refreshers ───
+    // Cache accounts for auth_mode display
+    fetch("/api/accounts-config").then(function(r){return r.json();}).then(function(a){window._accountsCache=a;}).catch(function(){});
+
     async function refreshStatus() {
       try {
         var responses = await Promise.all([fetch("/api/status"), fetch("/api/kpi/today")]);
