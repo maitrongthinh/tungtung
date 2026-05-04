@@ -634,6 +634,42 @@ async def api_exchange_meta_token(payload: dict, request: Request) -> JSONRespon
         return JSONResponse({"error": str(exc)}, status_code=500)
 
 
+
+@app.post("/api/meta/validate-cookies")
+async def api_validate_fb_cookies(payload: dict, request: Request) -> JSONResponse:
+    """Validate Facebook cookies by checking if they represent a valid session."""
+    await _require_auth(request)
+    if not _check_rate_limit("fb_cookie_validate", max_requests=5, window_seconds=60):
+        raise HTTPException(429, "Rate limited")
+    cookies_str = str(payload.get("cookies", "")).strip()
+    if not cookies_str:
+        return JSONResponse({"valid": False, "reason": "No cookies provided"})
+    try:
+        from modules.meta.drivers.cookie_utils import parse_cookies, validate_essential_cookies, create_client, fetch_tokens
+        cookies = parse_cookies(cookies_str)
+        valid, reason = validate_essential_cookies(cookies)
+        if not valid:
+            return JSONResponse({"valid": False, "reason": reason, "cookie_count": len(cookies)})
+        # Test the cookies against Facebook
+        async with create_client(cookies) as client:
+            fb_dtsg, jazoest, user_id = await fetch_tokens(client)
+            if user_id:
+                return JSONResponse({
+                    "valid": True,
+                    "reason": "ok",
+                    "user_id": user_id,
+                    "cookie_count": len(cookies),
+                    "has_dtsg": bool(fb_dtsg),
+                })
+            return JSONResponse({
+                "valid": False,
+                "reason": "Could not get user session from Facebook — cookies may be expired",
+                "cookie_count": len(cookies),
+            })
+    except Exception as exc:
+        return JSONResponse({"valid": False, "reason": str(exc)})
+
+
 @app.post("/api/chat")
 async def api_chat(payload: dict, request: Request) -> JSONResponse:
     ip = request.client.host if request.client else "unknown"

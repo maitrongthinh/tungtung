@@ -339,11 +339,14 @@ class AgentOrchestrator:
                 post.status = "published"
                 post.published_at = datetime.now(UTC)
                 if not fb_post_id.startswith("dryrun-"):
-                    insights = await self.publisher.fetch_post_insights(fb_post_id, account.resolved_access_token() or "")
-                    post.performance.likes = insights.get("likes", 0)
-                    post.performance.comments = insights.get("comments", 0)
-                    post.performance.shares = insights.get("shares", 0)
-                    post.performance.reach = insights.get("reach", 0)
+                    try:
+                        insights = await self.publisher.fetch_post_insights(account, fb_post_id)
+                        post.performance.likes = insights.get("likes", 0)
+                        post.performance.comments = insights.get("comments", 0)
+                        post.performance.shares = insights.get("shares", 0)
+                        post.performance.reach = insights.get("reach", 0)
+                    except Exception as exc:
+                        logger.warning("Could not fetch insights for %s: %s", fb_post_id, exc)
                 self.database.upsert_post(post)
                 self.farm_manager.save_published(post)
                 published.append(post)

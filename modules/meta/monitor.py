@@ -1,8 +1,11 @@
+"""MetaMonitor — comment monitoring and auto-reply.
+
+Delegates comment fetching and replying to the appropriate driver
+(Graph API, cookie_page, or cookie_profile) based on account.auth_mode.
+"""
 from __future__ import annotations
 
 from datetime import UTC, datetime
-
-import httpx
 
 from common.ai import can_consume_ai_budget, estimate_tokens
 from common.config import load_settings
@@ -10,6 +13,7 @@ from common.database import Database
 from common.logging import get_logger
 from common.models import AccountConfig, CommentRecord, PostRecord
 from modules.ai.client import JSONModelClient, OpenAIJSONClient
+from modules.meta.drivers import get_driver_for_account
 
 logger = get_logger(__name__)
 
@@ -43,28 +47,37 @@ class MetaMonitor:
         self.client = client or OpenAIJSONClient()
 
     async def fetch_comments(self, account: AccountConfig, fb_post_id: str) -> list[CommentRecord]:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            response = await client.get(
-                self._graph_url(f"/{fb_post_id}/comments"),
-                params={"fields": "id,message,from,created_time", "access_token": account.resolved_access_token() or ""},
-            )
-            response.raise_for_status()
-            data = response.json().get("data", [])
-            comments: list[CommentRecord] = []
-            for item in data:
-                message = item.get("message", "")
-                comments.append(
-                    CommentRecord(
-                        id=str(item.get("id")),
-                        author=item.get("from", {}).get("name", ""),
-                        message=message,
-                        created_at=datetime.fromisoformat(item.get("created_time").replace("Z", "+00:00")) if item.get("created_time") else datetime.now(UTC),
-                        flagged=any(keyword in message.lower() for keyword in FLAG_KEYWORDS),
-                    )
-                )
-            return comments
+        """Fetch comments using the account's driver."""
+        driver = get_driver_for_account(account)
+        raw = await driver.fetch_comments(account, fb_post_id)
 
-    async def monitor_posts(self, posts: list[PostRecord], accounts: dict[str, AccountConfig]) -> dict[str, list[CommentRecord]]:
+        comments: list[CommentRecord] = []
+        for item in raw:
+            message = item.get("message", "")
+            created_raw = item.get("created_time", "")
+            created_at = datetime.now(UTC)
+            if created_raw:
+                try:
+                    created_at = datetime.fromisoformat(
+                        created_raw.replace("Z", "+00:00")
+                    )
+                except (ValueError, AttributeError):
+                    pass
+
+            comments.append(
+                CommentRecord(
+                    id=str(item.get("id", "")),
+                    author=item.get("from", {}).get("name", "") if isinstance(item.get("from"), dict) else "",
+                    message=message,
+                    created_at=created_at,
+                    flagged=any(keyword in message.lower() for keyword in FLAG_KEYWORDS),
+                )
+            )
+        return comments
+
+    async def monitor_posts(
+        self, posts: list[PostRecord], accounts: dict[str, AccountConfig]
+    ) -> dict[str, list[CommentRecord]]:
         results: dict[str, list[CommentRecord]] = {}
         for post in posts:
             if not post.fb_post_id:
@@ -88,28 +101,26 @@ class MetaMonitor:
         post: PostRecord,
         comments: list[CommentRecord],
     ) -> None:
-        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            for comment in comments:
-                if not comment.flagged:
-                    continue
-                if self.database and self.database.has_replied_comment(comment.id):
-                    continue
-                reply_text = await self._generate_ai_reply(comment, post)
-                if not reply_text:
-                    reply_text = self._fallback_reply(post)
-                try:
-                    await client.post(
-                        self._graph_url(f"/{comment.id}/comments"),
-                        data={
-                            "message": reply_text,
-                            "access_token": account.resolved_access_token() or "",
-                        },
-                    )
+        """Reply to flagged comments using the account's driver."""
+        driver = get_driver_for_account(account)
+        for comment in comments:
+            if not comment.flagged:
+                continue
+            if self.database and self.database.has_replied_comment(comment.id):
+                continue
+
+            reply_text = await self._generate_ai_reply(comment, post)
+            if not reply_text:
+                reply_text = self._fallback_reply(post)
+
+            try:
+                success = await driver.reply_comment(account, comment.id, reply_text)
+                if success:
                     if self.database:
                         self.database.mark_comment_replied(comment.id, post.post_id)
                     logger.info("Replied to comment %s on post %s", comment.id, post.post_id)
-                except Exception as exc:
-                    logger.warning("Failed to reply to comment %s: %s", comment.id, exc)
+            except Exception as exc:
+                logger.warning("Failed to reply to comment %s: %s", comment.id, exc)
 
     async def _generate_ai_reply(self, comment: CommentRecord, post: PostRecord) -> str:
         settings = load_settings(refresh=True)
@@ -170,7 +181,3 @@ class MetaMonitor:
         if affiliate_link:
             return f"Bạn xem chi tiết và đặt hàng tại link trong bài nha 🛒 Nếu cần hỗ trợ thêm cứ nhắn tin cho mình!"
         return "Mình đã để thông tin trong bài rồi nha, bạn xem thử và nhắn tin nếu cần tư vấn thêm 😊"
-
-    def _graph_url(self, path: str) -> str:
-        version = load_settings(refresh=True).meta.graph_api_version
-        return f"https://graph.facebook.com/{version}{path}"

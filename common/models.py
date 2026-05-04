@@ -85,10 +85,17 @@ class AccountConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str
+    # ── Auth mode: "api" | "cookie_page" | "cookie_profile" ──
+    auth_mode: Literal["api", "cookie_page", "cookie_profile"] = "api"
     page_id: str = ""
+    # ── API mode fields ──
     access_token: str = ""
     access_token_env: str | None = None
     token_expires_at: str = ""
+    # ── Cookie mode fields ──
+    fb_cookies: str = ""  # Browser cookies: JSON array or semicolon string
+    fb_user_id: str = ""  # Facebook user ID (for cookie_profile: owner of the timeline)
+    # ── General ──
     page_name: str = ""
     niche: str = ""
     tone: str = ""

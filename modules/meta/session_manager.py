@@ -50,26 +50,30 @@ class MetaSessionManager:
         return sorted(candidates, key=lambda item: item[1])[0]
 
     async def verify_accounts(self, accounts: list[AccountConfig]) -> dict[str, str]:
+        """Verify each account using its designated driver.
+
+        For API accounts, also attempts token refresh if needed.
+        For cookie accounts, checks session validity via the cookie driver.
+        """
+        from modules.meta.drivers import get_driver_for_account
+        from modules.meta.drivers.graph_api import GraphAPIDriver
+
         health: dict[str, str] = {}
-        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
-            for account in accounts:
-                token = account.resolved_access_token()
-                if not token:
-                    health[account.id] = "missing_token"
-                    continue
-                try:
-                    response = await client.get(
-                        self._graph_url(f"/{account.page_id}"),
-                        params={"fields": "id,name", "access_token": token},
-                    )
-                    if response.status_code == 200:
-                        await self.refresh_token_if_needed(client, account)
-                        health[account.id] = "ok"
-                    else:
-                        health[account.id] = f"error:{response.status_code}"
-                except Exception as exc:
-                    logger.warning("Meta account health check failed for %s: %s", account.id, exc)
-                    health[account.id] = "error"
+        for account in accounts:
+            driver = get_driver_for_account(account)
+            try:
+                result = await driver.verify(account)
+                health[account.id] = result
+
+                # For API mode: try token refresh if verification passed
+                if result == "ok" and isinstance(driver, GraphAPIDriver):
+                    token = account.resolved_access_token()
+                    if token:
+                        async with httpx.AsyncClient(timeout=20.0) as client:
+                            await self.refresh_token_if_needed(client, account)
+            except Exception as exc:
+                logger.warning("Account health check failed for %s (%s): %s", account.id, account.auth_mode, exc)
+                health[account.id] = "error"
         return health
 
     async def refresh_token_if_needed(self, client: httpx.AsyncClient, account: AccountConfig) -> None:

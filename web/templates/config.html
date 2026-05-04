@@ -72,7 +72,7 @@
           <h2>Facebook Accounts</h2>
           <button id="addAccountBtn">+ Thêm Account</button>
         </div>
-        <p class="muted" style="margin-bottom:16px;">Mỗi account là một Facebook Page. Mỗi account giữ token và niche riêng.</p>
+        <p class="muted" style="margin-bottom:16px;">Mỗi account là một Facebook Page hoặc trang cá nhân. Chọn chế độ xác thực phù hợp: API (cần Meta App live), Cookie Page (đăng bài lên Page bằng cookie), hoặc Cookie Profile (đăng bài trang cá nhân bằng cookie).</p>
         <div id="accountsList" class="grid two"></div>
       </div>
     </div>
@@ -220,12 +220,43 @@
           </select>
         </div>
         <div class="form-group" style="grid-column:1/-1;">
-          <label>Meta Page ID</label>
-          <input type="text" id="accPageId" placeholder="581217808400891" />
+          <label>Chế độ xác thực (Auth Mode)</label>
+          <select id="accAuthMode">
+            <option value="api">📘 API — Graph API với Page Access Token (cần Meta App live mode)</option>
+            <option value="cookie_page">🍪 Cookie Page — Đăng bài lên Page bằng cookie trình duyệt</option>
+            <option value="cookie_profile">👤 Cookie Profile — Đăng bài trang cá nhân bằng cookie</option>
+          </select>
         </div>
-        <div class="form-group" style="grid-column:1/-1;">
-          <label>Page Access Token</label>
-          <input type="password" id="accToken" placeholder="EAAx..." />
+        <!-- API mode fields -->
+        <div id="apiModeFields" style="grid-column:1/-1;">
+          <div class="grid two" style="gap:12px;">
+            <div class="form-group">
+              <label>Meta Page ID</label>
+              <input type="text" id="accPageId" placeholder="581217808400891" />
+            </div>
+            <div class="form-group">
+              <label>Page Access Token</label>
+              <input type="password" id="accToken" placeholder="EAAx..." />
+            </div>
+          </div>
+        </div>
+        <!-- Cookie mode fields -->
+        <div id="cookieModeFields" style="grid-column:1/-1;display:none;">
+          <div class="grid two" style="gap:12px;">
+            <div class="form-group">
+              <label>Page ID (cookie_page) hoặc User ID (cookie_profile, để trống = tự detect)</label>
+              <input type="text" id="accPageIdCookie" placeholder="Page ID hoặc User ID" />
+            </div>
+            <div class="form-group">
+              <label>Facebook User ID (tùy chọn, cho cookie_profile)</label>
+              <input type="text" id="accFbUserId" placeholder="100012345678 (tự lấy từ c_user cookie)" />
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:8px;">
+            <label>Facebook Cookies (JSON array từ EditThisCookie hoặc semicolon-separated)</label>
+            <textarea id="accFbCookies" class="editor" style="min-height:120px;font-size:0.8rem;" placeholder='[{"name":"c_user","value":"123456",...},{"name":"xs","value":"abc",...}]'></textarea>
+            <p class="muted" style="font-size:0.78rem;margin-top:4px;">💡 Mở Facebook → F12 → Application → Cookies → chọn .facebook.com → Export bằng extension EditThisCookie/Cookie Editor</p>
+          </div>
         </div>
       </div>
       <div class="dialog-actions">
@@ -446,6 +477,13 @@
       document.getElementById("accStatus").value = acc.status||"active";
       document.getElementById("accPageId").value = acc.page_id||"";
       document.getElementById("accToken").value = acc.access_token||"";
+      // New fields
+      var authMode = acc.auth_mode || "api";
+      document.getElementById("accAuthMode").value = authMode;
+      document.getElementById("accPageIdCookie").value = acc.page_id||"";
+      document.getElementById("accFbUserId").value = acc.fb_user_id||"";
+      document.getElementById("accFbCookies").value = acc.fb_cookies||"";
+      toggleAuthModeFields(authMode);
       document.getElementById("accountModal").showModal();
     };
 
@@ -467,22 +505,29 @@
       _editingAccountId = null;
       document.getElementById("accId").value = "";
       document.getElementById("accId").disabled = false;
-      ["accPageName","accNiche","accTone","accPageId","accToken"].forEach(function(id){ document.getElementById(id).value=""; });
+      ["accPageName","accNiche","accTone","accPageId","accToken","accPageIdCookie","accFbUserId"].forEach(function(id){ document.getElementById(id).value=""; });
+      document.getElementById("accFbCookies").value = "";
+      document.getElementById("accAuthMode").value = "api";
+      toggleAuthModeFields("api");
       document.getElementById("accLimit").value = "7";
       document.getElementById("accStatus").value = "active";
       document.getElementById("accountModal").showModal();
     });
 
     document.getElementById("saveAccountBtn").addEventListener("click", async function() {
+      var authMode = document.getElementById("accAuthMode").value;
       var payload = {
         id: document.getElementById("accId").value||"new",
+        auth_mode: authMode,
         page_name: document.getElementById("accPageName").value,
         niche: document.getElementById("accNiche").value,
         tone: document.getElementById("accTone").value,
         daily_post_limit: parseInt(document.getElementById("accLimit").value)||7,
         status: document.getElementById("accStatus").value,
-        access_token: document.getElementById("accToken").value,
-        page_id: document.getElementById("accPageId").value,
+        access_token: authMode === "api" ? document.getElementById("accToken").value : "",
+        page_id: authMode === "api" ? document.getElementById("accPageId").value : document.getElementById("accPageIdCookie").value,
+        fb_cookies: authMode !== "api" ? document.getElementById("accFbCookies").value : "",
+        fb_user_id: authMode === "cookie_profile" ? document.getElementById("accFbUserId").value : "",
       };
       var res = await fetch("/api/accounts", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(payload) });
       if (res.ok) {
@@ -761,6 +806,23 @@
           el.textContent = "❌ " + (data.error || "Lỗi không xác định");
         }
       } catch(e) { el.classList.add("invalid"); el.textContent = "❌ " + e.message; }
+    });
+
+    // ─── Auth Mode Toggle ───
+    function toggleAuthModeFields(mode) {
+      var apiFields = document.getElementById("apiModeFields");
+      var cookieFields = document.getElementById("cookieModeFields");
+      if (mode === "api") {
+        apiFields.style.display = "block";
+        cookieFields.style.display = "none";
+      } else {
+        apiFields.style.display = "none";
+        cookieFields.style.display = "block";
+      }
+    }
+
+    document.getElementById("accAuthMode").addEventListener("change", function() {
+      toggleAuthModeFields(this.value);
     });
 
     // ─── Init ───
